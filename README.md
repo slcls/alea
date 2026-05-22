@@ -1,2 +1,2 @@
-# alea
-Alea is a trustless, self-hosted, API-less Verifiable Randomness Router in Python. It generates un-riggable entropy via local Helios (ETH/Base L2) and Bitcoin SPV light clients, eliminating oracle risks. Featuring three security tiers (BASE, ETH, BTC), Alea uses canonicalized SHA3-256 and large-integer modulo to ensure bias-free outputs.
+# Project Under Development
+See [masterplan.md](https://github.com/slcls/alea/blob/52f90e8ea6a556ead91821f1f98322e4934bfec8/docs/masterplan.md) for more information.
