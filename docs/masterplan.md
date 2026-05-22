@@ -32,35 +32,35 @@ Blockchains face a strict trilemma between speed and security (The Last Actor Pr
 
 ### MODE A: Optimistic
 - **Consensus Source:**
-> Base Network (Optimism Stack Layer 2)
+    > Base Network (Optimism Stack Layer 2)
 - **Fixed Latency:**
-> 2 Seconds
+    > 2 Seconds
 - **Mechanism:**
-> Fetched via the local Helios Light Client
+    > Fetched via the local Helios Light Client
 - **Optional Sub-Second Temporal Salting:**
-> For applications requiring sub-second pulses between the 2-second blocks, users can optionally salt the block hash with the local host’s exact millisecond timestamp.
+    > For applications requiring sub-second pulses between the 2-second blocks, users can optionally salt the block hash with the local host’s exact millisecond timestamp.
 
     - Security Tradeoff: Introducing the local clock opens a Grinding Attack Vector. A malicious host could iterate hashes within a 2-second window to pick a favorable outcome, downgrading the crypto-native guarantee to a "Provably Honest Server" model.
 
 ### MODE B: Attested
 - **Consensus Source:**
-> Ethereum Mainnet
+    > Ethereum Mainnet
 
 - **Fixed Latency:**
-> 12 Seconds (Aligned with Ethereum Slot consensus cycle)
+    > 12 Seconds (Aligned with Ethereum Slot consensus cycle)
 
 - **Mechanism:**
-> Uses the mixHash from the RANDAO beacon, fetched via Helios.
+    > Uses the mixHash from the RANDAO beacon, fetched via Helios.
 
 - **Threat Model Mitigation:**
-> Protected by the Ethereum PoS. A rogue validator must drop their block, forfeiting thousands of dollars in block rewards and MEV, to manipulate the feed.
+    > Protected by the Ethereum PoS. A rogue validator must drop their block, forfeiting thousands of dollars in block rewards and MEV, to manipulate the feed.
 
 ### MODE C: Proof
 - Consensus Source:
-> Bitcoin Mainnet Block Header.
+    > Bitcoin Mainnet Block Header.
 
 - Latency Profile:
-> ~10 Minutes average (Poisson Distribution)
+    > ~10 Minutes average (Poisson Distribution)
 
 - Mechanism & Mitigation:
-> Fetched via a local Simplified Payment Verification (SPV) client connecting directly to the BTC P2P network. To negate human coordination and "Spoiler Problems," selection runs completely independent of UTC time. Registrations close at a designated Block $X$. The winning seed is bound explicitly to the header of a future target block ($X + N$), forcing a malicious miner to forfeit ~$200,000+ in rewards to alter the draw.
+    > Fetched via a local Simplified Payment Verification (SPV) client connecting directly to the BTC P2P network. To negate human coordination and "Spoiler Problems," selection runs completely independent of UTC time. Registrations close at a designated Block $X$. The winning seed is bound explicitly to the header of a future target block ($X + N$), forcing a malicious miner to forfeit ~$200,000+ in rewards to alter the draw.
