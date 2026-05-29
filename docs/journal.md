@@ -20,3 +20,18 @@ This time period as well as the past months prior was taken to conceptualize Ale
 `core/server` - Websockets stuff probably.
 
 ### 2. Added the initial `canonicalization.py`
+
+Not only have I drafted the initial `canonicalization.py` including features like prefix (0x, 0000...) checking, overflow guards (on negative signed integers), and null/empty payload checking, BUT, ***I discovered a flaw, and through it, I discovered a better feature as well...*** on my previous plan on having `|` or `b'\x76'` as a delimiter when joining two aggregates/input. Let me write down the details in here:
+
+- The original plan was to use `|` as a delimiter, but think about it, say on the planned sub-second or domain seperation mode, an attacker intentionally added `|` to the payload, then my `build_payload(*args)` function would let it pass through, allowing an attacker to manipulate the output. Example:
+
+    - **Normal Payload:**
+    > `input("shan","111","ph")` -> `shan|111|ph`
+    - **Malicious Payload:**
+    > `input("shan|69","111","ph")` -> `shan|69|111|ph`
+
+- Of course, I could've simply filtered the input to not allow `|`, but I took inspiration on **[Ethereum's RLP serialization](https://ethereum.org/developers/docs/data-structures-and-encoding/rlp)** wherein before appending a data, we append first exactly how many bytes the data contains (a.k.a length prefixing). In my case, it also makes it impossible to spoof boundaries using special characters. Example
+    - **Normal Payload:**
+    > `input("shan","100")` -> `[00 00 00 04]shan[00 00 00 03]100`
+    - **Malicious Payload:**
+    > `input("shan|69","100")` -> `[00 00 00 07]shan|69[00 00 00 03]100`

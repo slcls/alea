@@ -1,6 +1,5 @@
 import re # Imported this so that no hex string from SPV ever gets passed as utf-8.
 
-DELIMITER = b'\x76'
 HEX_0X_PATTERN = re.compile(r'^0[xX][0-9a-fA-F]+$')
 BTC_HASH_PATTERN = re.compile(r'^[0-9a-fA-F]{64}$')
 
@@ -38,6 +37,7 @@ def build_payload(*args) -> bytes: # "-> bytes" to ensure at least 1 byte comes 
         raw_bytes = _to_bytes(arg)
         data_length = len(raw_bytes)
 
+        # Inspired from Ethereum's RLP serialization
         length_prefix = data_length.to_bytes(4, byteorder='big', signed=False)
         payload.extend(length_prefix)
         payload.extend(raw_bytes)

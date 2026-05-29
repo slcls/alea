@@ -137,7 +137,7 @@ Because blockchains are public and SHA3-256 is deterministic, the host loses all
 ## 5. Anti-Bias Math Design
 This layer ensures that aggregated raw blockchain data are processed into verifiable outcomes without the risk of structural biases.
 
-### A. Anti-Canonicalization
+### A. Canonicalization
 This applies to both `sub-second` and `Domain Separation` configuration.
 
 To protect the combined inputs against canonicalization attacks *(e.g., scenarios wherein the output of `12+345` == `123+25`)*, all inputs absorbed into the *SHA3-256* (Keccak) sponge are separated by a byte delimiter (`0x7C` / the ASCII `|` character):
