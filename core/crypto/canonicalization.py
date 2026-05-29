@@ -28,9 +28,18 @@ def _to_bytes(value) -> bytes:
     else:
         raise TypeError(f"[ERROR] canonicalization.py: Unsupported valuetype -> {type(value)}")
     
-def build_payload(*args) -> bytes:
+def build_payload(*args) -> bytes: # "-> bytes" to ensure at least 1 byte comes out.
     if not args:
         raise ValueError("[ERROR] canonicalization.py: Payload must contain at least one element.")
     
-    byte_args = [_to_bytes(arg) for arg in args]
-    return DELIMITER.join(byte_args)
+    payload = bytearray()
+
+    for arg in args:
+        raw_bytes = _to_bytes(arg)
+        data_length = len(raw_bytes)
+
+        length_prefix = data_length.to_bytes(4, byteorder='big', signed=False)
+        payload.extend(length_prefix)
+        payload.extend(raw_bytes)
+
+    return bytes(payload)
