@@ -1,2 +1,2 @@
 # Project Under Development
-See [masterplan.md](https://github.com/slcls/alea/blob/main/docs/masterplan.md) for more information.
+Check my progress here -> [journal.md](https://github.com/slcls/alea/blob/main/docs/journal.md) or see [masterplan.md](https://github.com/slcls/alea/blob/main/docs/masterplan.md) for more information.
