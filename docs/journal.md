@@ -65,3 +65,7 @@ by using custom exception class `class ModuloBiasRejection(Exception)` to esseen
 ### 3. Added the initial `hashing.py`
 
 The hashing wrapper was actually already integrated on `rejection_sampling.py`, I have decided to separate it though according to the initial architectural plan for better security auditing and reusability.
+
+### 4. Added the initial `crypto_bias.py` test module
+
+This program essentially contains multiple rejection sampling related tests including: valid input, rejection sampling, invalid hash length, invalid ticket count, grinding loop & recovery, and payload integrity test.
