@@ -1,5 +1,5 @@
-import hashlib
 from typing import Callable, Tuple
+from core.crypto.hashing import generate_sha3_256
 
 class ModuloBiasRejection(Exception):
     pass
@@ -30,7 +30,7 @@ def generate_zero_bias_winner(
 
     while True:
         current_payload = payload_builder(*base_args, nonce)
-        hash_bytes = hashlib.sha3_256(current_payload).digest()
+        hash_bytes = generate_sha3_256(current_payload)
 
         try:
             winning_ticket = sample_from_bytes(hash_bytes, total_tickets)

@@ -37,3 +37,31 @@ Not only have I drafted the initial `canonicalization.py` including features lik
     > `input("shan|69","100")` -> `[00 00 00 07]shan|69[00 00 00 03]100`
 
 ## 05/30 to 06/02:
+
+### 1. Added the initial `rejection_sampling.py`
+
+This is one of the most important part of the program wherein instead of using the simple `hash % total_tickets`, I took into account **Modulo Bias**. To further understand this concept, say that our hash is tiny (outputs numbers from 0 to 10 only, which equates to a total of 11 possible outcome) and we run a lottery with 3 tickets... by using the simple formula, we can visualize the biased outputs that we need to place into our rejection zone. (say that the formula is `hash % 3`)
+
+| HASHES        | WINNING TICKET  | Winning Chances    | 
+|:--------------|:----------------|:-------------------|
+| `0, 3, 6, 9`  | Ticket 0        | 4 Times            |
+| `1, 4, 7, 10` | Ticket 1        | 4 Times            |
+| `2, 5, 8`     | Ticket 2        | 3 Times            |
+
+We can see from this table that ticket 0 and 1 has unfair advantage, which we can fix by calculating the uneven remainder at the top of the range (hashes 9 and 10) and declaring them a Rejection Zone.
+
+### 2. Updated `rejection_sampling.py`
+
+I have updated this string-based error checking part:
+```python
+except ValueError as e:
+            if "[REJECT]" in str(e):
+                nonce += 1
+                continue
+```
+
+by using custom exception class `class ModuloBiasRejection(Exception)` to esseentially make the program stable in case of string changes.
+
+### 3. Added the initial `hashing.py`
+
+The hashing wrapper was actually already integrated on `rejection_sampling.py`, I have decided to separate it though according to the initial architectural plan for better security auditing and reusability.
