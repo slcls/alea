@@ -1,19 +1,22 @@
 import hashlib
 from typing import Callable, Tuple
 
-SHA3_256_MAX = 1 << 256
+class ModuloBiasRejection(Exception):
+    pass
+
+SHA3_256_MAX = 1 << 256 # Max value, which equates to 2^256.
 
 def sample_from_bytes(hash_bytes: bytes, total_tickets: int) -> int:
-    if len(hash_bytes) != 32:
-        raise ValueError(f"[ERROR] Rejection Sampling: Input must be exactly 32 bytes, got {len(hash_bytes)}")
+    if len(hash_bytes) != 32: # 256 / 8 = 32 bytes :)
+        raise ValueError(f"[ERROR] rejection_sampling.py: Input must be exactly 32 bytes, got {len(hash_bytes)}")
     if total_tickets <= 0:
-        raise ValueError("[ERROR] Rejection Sampling: Total tickets must be greater than zero.")
+        raise ValueError("[ERROR] rejection_sampling.py: Total tickets must be greater than zero.")
     
     hash_int = int.from_bytes(hash_bytes, byteorder='big')
     limit = SHA3_256_MAX - (SHA3_256_MAX % total_tickets)
 
     if hash_int >= limit:
-        raise ValueError("[REJECT] Hash fell into the modulo bias zone. Resampling required.")
+        raise ModuloBiasRejection("[REJECT] rejection_sampling.py: Hash fell into the modulo bias zone. Resampling applied.")
     
     return hash_int % total_tickets
 
@@ -33,8 +36,6 @@ def generate_zero_bias_winner(
             winning_ticket = sample_from_bytes(hash_bytes, total_tickets)
             return winning_ticket, nonce
         
-        except ValueError as e:
-            if "[REJECT]" in str(e):
-                nonce += 1
-                continue
-            raise e
+        except ModuloBiasRejection:
+            nonce += 1
+            continue
