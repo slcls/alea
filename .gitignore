@@ -1,6 +1,7 @@
 # PROJECT SPECIFICS
 /docs/roadmap.md
 /docs/architecture.txt
+/docs/notes.txt
 /bin/
 /data/
 __pycache__/

@@ -69,3 +69,64 @@ The hashing wrapper was actually already integrated on `rejection_sampling.py`, 
 ### 4. Added the initial `crypto_bias.py` test module
 
 This program essentially contains multiple rejection sampling related tests including: valid input, rejection sampling, invalid hash length, invalid ticket count, grinding loop & recovery, and payload integrity test.
+
+### 5. Made a unified `crypto/` testing module `test_crypto.py`
+
+Instead of a separate test program for each and every module inside `core/crypto/`, I have decided to create a single unified program instead wherein each crypto module tests are divided into classes:
+
+- `TestHashing(unittest.TestCase)` for `hashing.py`
+- `TestCanonicalization(unittest.TestCase)` for `canonicalization.py`
+- `TestRejectionSampling(unittest.TestCase)` for `rejection_sampling.py`
+
+Each and every possible scenarios, inputs, and possibilities that I can think of has a test function. This theoretically and analytically ensures that the core cryptography modules of this program will remain stable and behave as expected in the future. See **[test_crypto.py](https://github.com/slcls/alea/blob/main/tests/test_crypto.py)**.
+
+---
+
+All the effort and time spent making these test proved to be worth it, run it for the first time, and I was hit by these errors lmao 🤣:
+
+<details>
+<summary>Click to expand test traceback</summary>
+
+```text
+(.venv) @slcls ➜ /workspaces/alea (main) $ python -m unittest tests.test_crypto
+....EE...........
+======================================================================
+ERROR: test_integer_parsing (tests.test_crypto.TestCanonicalization.test_integer_parsing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspaces/alea/tests/test_crypto.py", line 44, in test_integer_parsing
+    payload_255 = build_payload(255)
+                  ^^^^^^^^^^^^^^^^^^
+  File "/workspaces/alea/core/crypto/canonicalization.py", line 37, in build_payload
+    raw_bytes = _to_bytes(arg)
+                ^^^^^^^^^^^^^^
+  File "/workspaces/alea/core/crypto/canonicalization.py", line 25, in _to_bytes
+    return value.to_bytes(byte_length, byteorder='big', signed=True) # Signedd just in case it goes negative.
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OverflowError: int too big to convert
+
+======================================================================
+ERROR: test_multi_argument_payload (tests.test_crypto.TestCanonicalization.test_multi_argument_payload)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspaces/alea/tests/test_crypto.py", line 59, in test_multi_argument_payload
+    payload = build_payload("0xaa", 255)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/alea/core/crypto/canonicalization.py", line 37, in build_payload
+    raw_bytes = _to_bytes(arg)
+                ^^^^^^^^^^^^^^
+  File "/workspaces/alea/core/crypto/canonicalization.py", line 25, in _to_bytes
+    return value.to_bytes(byte_length, byteorder='big', signed=True) # Signedd just in case it goes negative.
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OverflowError: int too big to convert
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.003s
+
+FAILED (errors=2)
+```
+</details>
+<br>
+
+I'm still not exactly sure why it overflowed but yeah, that's something for me to figure out sometime after my midterms 🙏.
+
