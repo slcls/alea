@@ -35,3 +35,5 @@ Not only have I drafted the initial `canonicalization.py` including features lik
     > `input("shan","100")` -> `[00 00 00 04]shan[00 00 00 03]100`
     - **Malicious Payload:**
     > `input("shan|69","100")` -> `[00 00 00 07]shan|69[00 00 00 03]100`
+
+## 05/30 to 06/02:
