@@ -22,8 +22,11 @@ def _to_bytes(value) -> bytes:
     
     elif isinstance(value, int):
         byte_length = (value.bit_length() + 7) // 8 or 1 # Allocation for bytes, "or 1" for empty values
-        return value.to_bytes(byte_length, byteorder='big', signed=True) # Signedd just in case it goes negative.
-    
+        try:
+            return value.to_bytes(byte_length, byteorder='big', signed=True)
+        except OverflowError:
+            return value.to_bytes(byte_length + 1, byteorder='big', signed=True)
+
     else:
         raise TypeError(f"[ERROR] canonicalization.py: Unsupported valuetype -> {type(value)}")
     

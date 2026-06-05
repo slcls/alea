@@ -42,7 +42,7 @@ class TestCanonicalization(unittest.TestCase):
 
     def test_integer_parsing(self): # Integer Test.
         payload_255 = build_payload(255)
-        self.assertEqual(payload_255, b'\x00\x00\x00\x01\xff')
+        self.assertEqual(payload_255, b'\x00\x00\x00\x02\x00\xff') # Allocates 2 bytes when signed=True.
 
         payload_0 = build_payload(0)
         self.assertEqual(payload_0, b'\x00\x00\x00\x01\x00')
@@ -57,7 +57,7 @@ class TestCanonicalization(unittest.TestCase):
 
     def test_multi_argument_payload(self): # Multi-argument Payload Test.
         payload = build_payload("0xaa", 255)
-        expected = b'\x00\x00\x00\x01\xaa' + b'\x00\x00\x00\x01\xff'
+        expected = b'\x00\x00\x00\x01\xaa' + b'\x00\x00\x00\x02\x00\xff' # Updated 2 bytes header.
         self.assertEqual(payload, expected)
 
     def test_unsupported_type_rejection(self): # Unsupported type test.

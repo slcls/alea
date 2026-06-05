@@ -126,7 +126,32 @@ Ran 17 tests in 0.003s
 FAILED (errors=2)
 ```
 </details>
-<br>
 
 I'm still not exactly sure why it overflowed but yeah, that's something for me to figure out sometime after my midterms 🙏.
 
+## 06/03 to 06/05:
+
+### 1. Fixed the overflow error on signed integers.
+
+As it turns out, the error earlier `test_crypto.py` came from the fact that `canonicalization.py` integer block of `_to_bytes(value)` function serialized the integer `255` into `1 byte` using `signed=True`. It was a bit confusing but if my research serves me right, `signed=True` acts wherein the first bit on the left is used as a sign bit (0 for +, 1 for -), `255` translates to `11111111` to binary and if the integer is signed, `11111111` equates to `-1`. We kinda need 2 extra bytes to safely handle the data without overflow error so I just made this fix instead to detect overflow instead of doing some crazy ahh bit manipulation:
+
+```python
+elif isinstance(value, int):
+        byte_length = (value.bit_length() + 7) // 8 or 1
+        try:
+            return value.to_bytes(byte_length, byteorder='big', signed=True)
+        except OverflowError:
+            # Plus 1 byte if it overflows :)
+            return value.to_bytes(byte_length + 1, byteorder='big', signed=True)
+```
+
+Passed with flying colors 🙏
+
+```text
+(.venv) @slcls ➜ /workspaces/alea (main) $ python -m unittest tests.test_crypto
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.012s
+
+OK
+```
