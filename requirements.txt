@@ -1,0 +1,2 @@
+python-bitcoinlib==0.12.2
+websockets==16.0

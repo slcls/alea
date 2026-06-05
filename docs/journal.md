@@ -161,3 +161,7 @@ OK
 ---
 
 ## 06/07:
+
+### 1. Environment Prep for Phase 2 (Helios & SPV)
+
+- Installed Windows Subsystem for Linux (WSL2) on my Windows 10 computer since we aim for containerized microservice stack that runs seamlessly on Linux and ARM-based Raspberry Pis.
