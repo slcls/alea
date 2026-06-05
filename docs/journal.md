@@ -155,3 +155,9 @@ Ran 17 tests in 0.012s
 
 OK
 ```
+
+> Transitioning back to windows for phase 2 of this project, Helios and SPV integration. (this will probably be the hardest part)
+
+---
+
+## 06/07:
