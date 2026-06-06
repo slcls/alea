@@ -160,8 +160,19 @@ OK
 
 ---
 
-## 06/07:
+## 06/06:
 
 ### 1. Environment Prep for Phase 2 (Helios & SPV)
 
-- Installed Windows Subsystem for Linux (WSL2) on my Windows 10 computer since we aim for containerized microservice stack that runs seamlessly on Linux and ARM-based Raspberry Pis.
+- Installed `Windows Subsystem for Linux (WSL2)` on my Windows 10 computer since we aim for containerized microservice stack that runs seamlessly on Linux and ARM-based Raspberry Pis.
+- Fully configured the environment including venv as well as the `python-bitcoinlib==0.12.2` & `websockets==16.0`.
+
+By the way, as per the local Python environment (including WSL2), I opted to use **Python Version 3.11** for a major reason. Docker microservices uses `python:3.11-slim-bookworm` base image, and also, python 3.11 image has a very small footprint. Plus, it's relatively stable compared to version 3.14 that is still in pre-release / development phase.
+
+### 2. Installed `Helios 0.11.1` Binary
+
+- Added **[Helios](https://github.com/a16z/helios/) release 0.11.1** ***Linux amd64 binary*** and added it to WSL2 alea `/bin` directory with proper permission.
+
+### 3. Drafted `btc_spv.py`
+
+Addeed the initial configuration including the pathing to reach `/data/spv_state.db` and some initial sqlite setup with write-ahead logging.

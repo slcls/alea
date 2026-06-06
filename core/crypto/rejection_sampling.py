@@ -16,7 +16,7 @@ def sample_from_bytes(hash_bytes: bytes, total_tickets: int) -> int:
     limit = SHA3_256_MAX - (SHA3_256_MAX % total_tickets)
 
     if hash_int >= limit:
-        raise ModuloBiasRejection("[REJECT] rejection_sampling.py: Hash fell into the modulo bias zone. Resampling applied.")
+        raise ModuloBiasRejection("[ALERT] rejection_sampling.py: Hash fell into the modulo bias zone. Resampling applied.")
     
     return hash_int % total_tickets
 

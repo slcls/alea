@@ -13,6 +13,7 @@ venv/
 ENV/
 .DS_Store
 Thumbs.db
+.wakatime-project
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
