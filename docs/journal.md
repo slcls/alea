@@ -173,6 +173,6 @@ By the way, as per the local Python environment (including WSL2), I opted to use
 
 - Added **[Helios](https://github.com/a16z/helios/) release 0.11.1** ***Linux amd64 binary*** and added it to WSL2 alea `/bin` directory with proper permission.
 
-### 3. Drafted `btc_spv.py`
+### 3. Drafted `btc_spv.py` & Cleard Up Ports
 
-Addeed the initial configuration including the pathing to reach `/data/spv_state.db` and some initial sqlite setup with write-ahead logging.
+Added the initial configuration including the pathing to reach `/data/spv_state.db` and some initial sqlite setup with write-ahead logging. I also cleared up some WSL2 & Windows processes running on `port 8545` (where helios ETH will run) and `port 8546` (helios for BASE).
