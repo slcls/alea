@@ -176,3 +176,14 @@ By the way, as per the local Python environment (including WSL2), I opted to use
 ### 3. Drafted `btc_spv.py` & Cleard Up Ports
 
 Added the initial configuration including the pathing to reach `/data/spv_state.db` and some initial sqlite setup with write-ahead logging. I also cleared up some WSL2 & Windows processes running on `port 8545` (where helios ETH will run) and `port 8546` (helios for BASE).
+
+## 06/07:
+
+### 1. Completed the `btc_spv.py` program
+
+Aside from the basic features earlier, I also added dotenv support (though initially it was hard-coded), full consensus node startup, logging, and exit cleanup. I also made some fixes and revisions along the way:
+
+- Added `/logs` on the root directory to store helios traceback instead of the original `DEVNULL` code, I certainly don't wanna be blind when errors like invalid API keys or firewall (port blocked) stuff happens.
+- Added `try/except Exception` so it doesn't flood my terminal with lots of logs in case of missing .env file (print a concise `[FATAL]` log instead).
+- Added `cl_rpc` validation for ETH helios booting (it's required, otherwise it will crash).
+- Added `atexit` to run `_cleanup_zombies` automatically regardless if the program crashes.
