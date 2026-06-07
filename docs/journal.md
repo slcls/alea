@@ -187,3 +187,32 @@ Aside from the basic features earlier, I also added dotenv support (though initi
 - Added `try/except Exception` so it doesn't flood my terminal with lots of logs in case of missing .env file (print a concise `[FATAL]` log instead).
 - Added `cl_rpc` validation for ETH helios booting (it's required, otherwise it will crash).
 - Added `atexit` to run `_cleanup_zombies` automatically regardless if the program crashes.
+
+### 2. Testing Helios & Networks
+
+I already expected this to be the hardest part lol, compared to codes that I can logically debug, this part requires a lot of ports observation, firewall config, and lots of other OS related stuff (plus I'm not used to this WSL ubunto distro). 😭🙏
+
+<details>
+<summary>Click to expand WSL traceback</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ python core/engines/helios_manager.py
+[ LOG ] helios_manager: Booting Ethereum Light Client on port 8545...
+[ LOG ] helios_manager: Tailing logs to -> /home/slcls/WORKSPACE/GITHUB/alea/data/logs/helios_ethereum_8545.log
+[ LOG ] helios_manager: Booting Base Light Client on port 8546...
+[ LOG ] helios_manager: Tailing logs to -> /home/slcls/WORKSPACE/GITHUB/alea/data/logs/helios_base_8546.log
+[ LOG ] helios_manager: Engines running. Press Ctrl+C to gracefully exit.
+
+slcls@SLCLS:~/WORKSPACE/GITHUB/alea$  source /home/slcls/WORKSPACE/GITHUB/alea/.venv/bin/activate
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ curl -X POST -H "Content-Type: application/json" \
+--data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+http://127.0.0.1:8545
+curl: (7) Failed to connect to 127.0.0.1 port 8545 after 0 ms: Could not connect to server
+```
+</details>
+
+Gotta check the log files though, might just be a simple syntax error on my end. (it really is lmao, writing this live btw) Thankfully I added `helios_ethereum_8545.log` & `helios_base_8546.log` instead of the `DEVNULL`.
+
+- So, as it turns out, the documentation that I was following earlier uses the old CLI syntax (`helios --network ethereum` should've been `helios ethereum --execution-rpc ...` & `helios opstack --network base --execution-rpc ...` for Base).
+
+The program seems to be working now (well not totally but the telemetry pipeline works), next step would be finding a good `ETH_CONSENSUS_RPC` endpoint for light clients, updating the links and env.

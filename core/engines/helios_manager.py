@@ -22,15 +22,23 @@ def start_helios_node(network: str, el_rpc: str, cl_rpc: str, rpc_port: int) -> 
     if not el_rpc:
         raise ValueError(f"[FATAL] helios_manager: Missing Execution RPC for {network}")
     
-    if network == "ethereum" and not cl_rpc:
-        raise ValueError(f"[FATAL] helios_manager: Missing Consensus RPC for {network}. Light client cannot verify state.")
-    
-    command = [
-        str(HELIOS_BIN),
-        "--network", network,
-        "--execution-rpc", el_rpc,
-        "--rpc-port", str(rpc_port)
-    ]
+    if network == "ethereum":
+        command = [
+            str(HELIOS_BIN),
+            "ethereum",
+            "--execution-rpc", el_rpc,
+            "--rpc-port", str(rpc_port)
+        ]
+    elif network == "base":
+        command = [
+            str(HELIOS_BIN),
+            "opstack",
+            "--network", "base",
+            "--execution-rpc", el_rpc,
+            "--rpc-port", str(rpc_port)
+        ]
+    else:
+        raise ValueError(f"[FATAL] helios_manager: Unsupported network '{network}'")
 
     if cl_rpc:
         command.extend(["--consensus-rpc", cl_rpc])
@@ -38,7 +46,7 @@ def start_helios_node(network: str, el_rpc: str, cl_rpc: str, rpc_port: int) -> 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"helios_{network}_{rpc_port}.log"
 
-    log_file = open(log_path, "a")
+    log_file = open(log_path, "w")
     _open_log_files.append(log_file)
 
     print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}...")
