@@ -216,3 +216,14 @@ Gotta check the log files though, might just be a simple syntax error on my end.
 - So, as it turns out, the documentation that I was following earlier uses the old CLI syntax (`helios --network ethereum` should've been `helios ethereum --execution-rpc ...` & `helios opstack --network base --execution-rpc ...` for Base).
 
 The program seems to be working now (well not totally but the telemetry pipeline works), next step would be finding a good `ETH_CONSENSUS_RPC` endpoint for light clients, updating the links and env.
+
+### 3. Public Endpoints
+
+Just made an account on Alchemy (gotta give them some credits, very generous on that free tier API limits), added those keys to `.env` and I also updated `/docs/.env.sample`. Just as a quick note, I used ETH chain key for `BASE_CONSENSUS_RPC` since base is an optimistic rollup, so it kinda borrows consensus data from ethereum for security.
+
+- **NOTE to my SELF:** Consider adding infura as a backup in the future, also give some big thanks to Hackclub, Alchemy, and Infura on `README.md`.
+
+Gonna test it out tomorrow, starting to feel a bit sleepy.
+
+## 06/08:
+
