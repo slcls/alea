@@ -15,33 +15,46 @@ LOG_DIR = PROJECT_ROOT / "data" / "logs"
 _active_processes = []
 _open_log_files = []
 
-def start_helios_node(network: str, el_rpc: str, cl_rpc: str, rpc_port: int) -> subprocess.Popen:
+def _get_rpc_list(env_var: str) -> list:
+    raw_val = os.getenv(env_var, "")
+
+    if not raw_val:
+        return []
+    return [url.strip() for url in raw_val.split(",") if url.strip()]
+
+def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: int, el_idx: int = 0, cl_idx: int = 0) -> subprocess.Popen:
     if not HELIOS_BIN.exists():
         raise FileNotFoundError(f"[FATAL] helios_manager: Binary not found at {HELIOS_BIN}")
     
-    if not el_rpc:
+    if not el_rpc_list:
         raise ValueError(f"[FATAL] helios_manager: Missing Execution RPC for {network}")
     
+    current_el = el_rpc_list[el_idx % len(el_rpc_list)]
+    current_cl = cl_rpc_list[cl_idx % len(cl_rpc_list)] if cl_rpc_list else None
+
     if network == "ethereum":
         command = [
             str(HELIOS_BIN),
             "ethereum",
-            "--execution-rpc", el_rpc,
+            "--execution-rpc", current_el,
             "--rpc-port", str(rpc_port)
         ]
+        if current_cl:
+            command.extend(["--consensus-rpc", current_cl])
+
     elif network == "base":
         command = [
             str(HELIOS_BIN),
             "opstack",
             "--network", "base",
-            "--execution-rpc", el_rpc,
+            "--execution-rpc", current_el,
             "--rpc-port", str(rpc_port)
         ]
+        if current_cl:
+            command.extend(["--l1-rpc", current_cl])
+
     else:
         raise ValueError(f"[FATAL] helios_manager: Unsupported network '{network}'")
-
-    if cl_rpc:
-        command.extend(["--consensus-rpc", cl_rpc])
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"helios_{network}_{rpc_port}.log"
@@ -49,7 +62,10 @@ def start_helios_node(network: str, el_rpc: str, cl_rpc: str, rpc_port: int) -> 
     log_file = open(log_path, "w")
     _open_log_files.append(log_file)
 
-    print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}...")
+    print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}")
+    print(f"[ LOG ] helios_manager: Target EL -> {current_el[:45]}")
+    if current_cl:
+        print(f"[ LOG ] helios_manager: Target CL/L1 -> {current_cl[:45]}")
     print(f"[ LOG ] helios_manager: Tailing logs to -> {log_path}")
 
     process = subprocess.Popen(
@@ -59,22 +75,59 @@ def start_helios_node(network: str, el_rpc: str, cl_rpc: str, rpc_port: int) -> 
     )
 
     _active_processes.append(process)
+
+    time.sleep(5)
+
+    if process.poll() is not None:
+        print(f"[ ALERT ] helios_manager: {network.capitalize()} client exited prematurely. Evaluating health logs...")
+
+        if process in _active_processes:
+            _active_processes.remove(process)
+        if log_file in _open_log_files:
+            _open_log_files.remove(log_file)
+        log_file.close()
+
+        with open(log_path, "r") as f:
+            error_content = f.read()
+
+        rpc_errors = ["503", "rpc error", "failed to advance", "error decoding", "status:"]
+
+        if any(err in error_content.lower() for err in rpc_errors):
+            next_el_idx = el_idx
+            next_cl_idx = cl_idx
+
+            if network == "ethereum" and len(cl_rpc_list) > 1 and (cl_idx + 1) < len(cl_rpc_list):
+                print("[ LOG ] helios_manager: Primary Consensus endpoint failed. Rotating to backup pool...")
+                next_cl_idx += 1
+            elif len(el_rpc_list) > 1 and (el_idx + 1) < len(el_rpc_list):
+                print(f"[ LOG ] helios_manager: Primary {network.capitalize()} Execution endpoint failed. Rotating to backup pool...")
+                next_el_idx += 1
+            else:
+                print(f"[FATAL] helios_manager: Network endpoints exhausted for {network}. No backups remain.")
+                return None
+            
+            return start_helios_node(network, el_rpc_list, cl_rpc_list, rpc_port, next_el_idx, next_cl_idx)
+        
+        else:
+            print(f"[FATAL] helios_manager: Non-network crash detected. Review error logs natively at: {log_path}")
+            return None
+        
     return process
 
 def boot_engines():
-    eth_el = os.getenv("ETH_EXECUTION_RPC")
-    eth_cl = os.getenv("ETH_CONSENSUS_RPC")
-    start_helios_node("ethereum", eth_el, eth_cl, 8545)
+    eth_el_pool = _get_rpc_list("ETH_EXECUTION_RPC")
+    eth_cl_pool = _get_rpc_list("ETH_CONSENSUS_RPC")
+    start_helios_node("ethereum", eth_el_pool, eth_cl_pool, 8545)
 
-    base_el = os.getenv("BASE_EXECUTION_RPC")
-    base_cl = os.getenv("BASE_CONSENSUS_RPC")
-    start_helios_node("base", base_el, base_cl, 8546)
+    base_el_pool = _get_rpc_list("BASE_EXECUTION_RPC")
+    base_cl_pool = _get_rpc_list("BASE_CONSENSUS_RPC")
+    start_helios_node("base", base_el_pool, base_cl_pool, 8546)
 
 def _cleanup_zombies():
     for proc in _active_processes:
         if proc.poll() is None:
-                proc.terminate()
-                proc.wait()
+            proc.terminate()
+            proc.wait()
 
     for log_file in _open_log_files:
         if not log_file.closed:

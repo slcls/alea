@@ -227,3 +227,45 @@ Gonna test it out tomorrow, starting to feel a bit sleepy.
 
 ## 06/08:
 
+Just got home from school, booted helios, and I'm `1780923672 seconds` (*56 years btw*) behind wth 😭🙏 and it seems like `lightclientdata.org` isn't as reliable as I once thought, got a `503 Service Temporarily Unavailable` error. This will definitely be a long night:
+
+<details>
+<summary>helios_ethereum_8545.log:</summary>
+
+```text
+[2m2026-06-08T13:00:08.131481Z[0m [31mERROR[0m [2mhelios::consensus[0m[2m:[0m sync failed [3merr[0m[2m=[0mcould not fetch bootstrap: rpc error on method: bootstrap, message: status: 503, raw response: b"<html>\r\n<head><title>503 Service Temporarily Unavailable</title></head>\r\n<body>\r\n<center><h1>503 Service Temporarily Unavailable</h1></center>\r\n</body>\r\n</html>\r\n"
+```
+</details>
+
+<details>
+<summary>helios_base_8546.log:</summary>
+
+```text
+[2m2026-06-08T13:00:07.623703Z[0m [31mERROR[0m [2mhelios::opstack[0m[2m:[0m failed to advance: error decoding response body
+```
+</details>
+
+<details>
+<summary>Bash Terminal log:</summary>
+
+```text
+slcls@SLCLS:~/WORKSPACE/GITHUB/alea$  source /home/slcls/WORKSPACE/GITHUB/alea/.venv/bin/activate
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ curl -X POST -H "Content-Type: application/json" \
+--data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+http://127.0.0.1:8545
+{"jsonrpc":"2.0","error":{"code":1,"message":"out of sync: 1780923672 seconds behind"},"id":1}
+```
+</details>
+
+Okay, I'm starting with ethereum first, the 503 error seems to be on `lightclientdata.org` end. Maybe it's congested or something, but this actually helped me identify a single point of failure that I haven't planned to work on during the initial design. To solve this, instead of relying solely on that RPC, I decided to add the following as well (of course, I needed to revise the .env as well as the helios manager to dynamically switch and query the next endpoint available upon failure):
+
+- **`https://beaconstate.ethstaker.cc` (EthStaker)**: Very reputable endpoint with some pretty good DDoS protection, maintaineed by community engineers. (Added this first on the list.)
+- **`https://lodestar-mainnet.chainsafe.io` (ChainSafe)**: If I'm not mistaken it's maintained by the same entity as the one who built **Lodestar** (one of the official production-grade Ethereum consensus clients), so I'm basically querying from the writer of the consensus software itself.
+
+As per the *"error decoding response body"* error on Base, I appended `--consensus-rpc` at the end of the helios command for both eth and base, but base asks for `--l1-rpc`, it was a wrong argument.
+
+In addition, although Alchemy is already as good as it gets, I'll probably add Infura as well tomorrow, just so everything is stable and there's no single point of failure.
+
+Completed all of the necessary revisions for `helios_manager.py` today, gotta sleep now and do some testing tomorrow and add Infura. (+ update `.env.sample`, can't forget that)
+
+## 06/09:
