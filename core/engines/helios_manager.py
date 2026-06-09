@@ -50,8 +50,6 @@ def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_po
             "--execution-rpc", current_el,
             "--rpc-port", str(rpc_port)
         ]
-        if current_cl:
-            command.extend(["--l1-rpc", current_cl])
 
     else:
         raise ValueError(f"[FATAL] helios_manager: Unsupported network '{network}'")
@@ -64,6 +62,7 @@ def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_po
 
     print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}")
     print(f"[ LOG ] helios_manager: Target EL -> {current_el[:45]}")
+
     if current_cl:
         print(f"[ LOG ] helios_manager: Target CL/L1 -> {current_cl[:45]}")
     print(f"[ LOG ] helios_manager: Tailing logs to -> {log_path}")
@@ -76,10 +75,28 @@ def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_po
 
     _active_processes.append(process)
 
-    time.sleep(5)
+    failed_health_check = False
+    for _ in range(12):
+        time.sleep(1)
 
-    if process.poll() is not None:
-        print(f"[ ALERT ] helios_manager: {network.capitalize()} client exited prematurely. Evaluating health logs...")
+        if process.poll() is not None:
+            failed_health_check = True
+            break
+
+        try:
+            with open(log_path, "r") as f:
+                live_log = f.read().lower()
+                if "429" in live_log or "404" in live_log or "too many requests" in live_log:
+                    print(f"[ WARN ] helios_manager: Rate limit (429) or 404 detected. Assassinating zombie process...")
+                    process.terminate()
+                    process.wait()
+                    failed_health_check = True
+                    break
+        except FileNotFoundError:
+            pass
+
+    if failed_health_check:
+        print(f"[ ALERT ] helios_manager: {network.capitalize()} client failed health check. Executing failover sequence...")
 
         if process in _active_processes:
             _active_processes.remove(process)
@@ -90,17 +107,17 @@ def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_po
         with open(log_path, "r") as f:
             error_content = f.read()
 
-        rpc_errors = ["503", "rpc error", "failed to advance", "error decoding", "status:"]
+        rpc_errors = ["503", "rpc error", "failed to advance", "error decoding", "status:", "429", "404"]
 
         if any(err in error_content.lower() for err in rpc_errors):
             next_el_idx = el_idx
             next_cl_idx = cl_idx
 
             if network == "ethereum" and len(cl_rpc_list) > 1 and (cl_idx + 1) < len(cl_rpc_list):
-                print("[ LOG ] helios_manager: Primary Consensus endpoint failed. Rotating to backup pool...")
+                print("[ LOG ] helios_manager: Consensus endpoint failed or throttled. Rotating to backup pool...")
                 next_cl_idx += 1
             elif len(el_rpc_list) > 1 and (el_idx + 1) < len(el_rpc_list):
-                print(f"[ LOG ] helios_manager: Primary {network.capitalize()} Execution endpoint failed. Rotating to backup pool...")
+                print(f"[ LOG ] helios_manager: {network.capitalize()} Execution endpoint failed. Rotating to backup pool...")
                 next_el_idx += 1
             else:
                 print(f"[FATAL] helios_manager: Network endpoints exhausted for {network}. No backups remain.")
@@ -109,7 +126,7 @@ def start_helios_node(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_po
             return start_helios_node(network, el_rpc_list, cl_rpc_list, rpc_port, next_el_idx, next_cl_idx)
         
         else:
-            print(f"[FATAL] helios_manager: Non-network crash detected. Review error logs natively at: {log_path}")
+            print(f"[FATAL] helios_manager: Network endpoints exhausted for {network}. No backups remain.")
             return None
         
     return process

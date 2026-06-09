@@ -257,10 +257,14 @@ http://127.0.0.1:8545
 ```
 </details>
 
+### 1. Added backup endpoints
+
 Okay, I'm starting with ethereum first, the 503 error seems to be on `lightclientdata.org` end. Maybe it's congested or something, but this actually helped me identify a single point of failure that I haven't planned to work on during the initial design. To solve this, instead of relying solely on that RPC, I decided to add the following as well (of course, I needed to revise the .env as well as the helios manager to dynamically switch and query the next endpoint available upon failure):
 
 - **`https://beaconstate.ethstaker.cc` (EthStaker)**: Very reputable endpoint with some pretty good DDoS protection, maintaineed by community engineers. (Added this first on the list.)
 - **`https://lodestar-mainnet.chainsafe.io` (ChainSafe)**: If I'm not mistaken it's maintained by the same entity as the one who built **Lodestar** (one of the official production-grade Ethereum consensus clients), so I'm basically querying from the writer of the consensus software itself.
+
+### 2. Fix Flag argument error
 
 As per the *"error decoding response body"* error on Base, I appended `--consensus-rpc` at the end of the helios command for both eth and base, but base asks for `--l1-rpc`, it was a wrong argument.
 
@@ -269,3 +273,34 @@ In addition, although Alchemy is already as good as it gets, I'll probably add I
 Completed all of the necessary revisions for `helios_manager.py` today, gotta sleep now and do some testing tomorrow and add Infura. (+ update `.env.sample`, can't forget that)
 
 ## 06/09:
+
+### 1. Fixed wrong network endpoint + `.env.sample` Update
+
+I just noticed it when I was adding Infura as a backup RPC, seems like I added optimism instead of Base network for the Alchemy endpoint. Fixed it now though and I've also updated the sample env.
+
+### 2. Fixed Flag & Re-ordered RPC
+
+Thankfully the log was very specific and it seems like the `--l1-rpc` isn't needed anymore on the latest update, did some minor revision on `helios_manager.py`.
+> `Usage: helios opstack --network <NETWORK> --execution-rpc <EXECUTION_RPC> --rpc-port <RPC_PORT>`
+
+Also, yesterday I made `beaconstate.ethstaker.cc` as the primary ETH RPC but upon testing today, I was weirded out why I didn't trigger the failover on the program upon failure. So I tested it out on insomnia and it seems that it actually connected by returned `404 Not Found`, not really sure but it seems like it's on their end. Added `lodestar-mainnet.chainsafe.io` as the primary endpoint now. (will definitely work on this further, later after the test of course)
+
+---
+
+Also, the base node is finally working!!!
+
+```text
+[2m2026-06-09T03:16:33.205860Z[0m [32m INFO[0m [2mhelios::client[0m[2m:[0m latest block     number=47092822 age=2s
+[2m2026-06-09T03:16:34.659792Z[0m [32m INFO[0m [2mhelios::client[0m[2m:[0m latest block     number=47092823 age=1s
+```
+
+Unfortunately, the ethereum node seems to be getting rate limited on both Alchemy as well as chainsafe:
+
+```text
+[2m2026-06-09T03:31:28.144903Z[0m [32m INFO[0m [2mhelios::consensus[0m[2m:[0m saved checkpoint to DB: 0x00275e1d7b9d5d048c67e0e71e8155a13de8a18b8dbfddc55e4f4e34a270cc30
+[2m2026-06-09T03:31:40.989073Z[0m [33m WARN[0m [2mhelios::consensus[0m[2m:[0m send error: rpc error on method: blocks, message: status: 429, raw response: b"<html>\r\n<head><title>429 Too Many Requests</title></head>\r\n<body>\r\n<center><h1>429 Too Many Requests</h1></center>\r\n<hr><center>nginx/1.29.8</center>\r\n</body>\r\n</html>\r\n"
+```
+
+### 3. Dangling processes Fix
+
+Okay, so first and foremost, it seems like the ETH node is trying to catch up with the latest header (`WARN helios::consensus: checkpoint too old`), and it behaved in a way that triggered rate-limiting for those platforms. It works on the first attempt though and upon checking my network history, it seems like the helios process doesn't stop querying after getting 249 error. It does so every ~10-12 seconds. In a way, the termination upon error logic that I've added to `helios_manager.py` doesn't work since helios isn't crashing, it's simply querying again and again. Refactored part of the `start_helios_node()` and added active telemetry and failover routing.
