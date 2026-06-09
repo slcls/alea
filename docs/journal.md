@@ -304,3 +304,8 @@ Unfortunately, the ethereum node seems to be getting rate limited on both Alchem
 ### 3. Dangling processes Fix
 
 Okay, so first and foremost, it seems like the ETH node is trying to catch up with the latest header (`WARN helios::consensus: checkpoint too old`), and it behaved in a way that triggered rate-limiting for those platforms. It works on the first attempt though and upon checking my network history, it seems like the helios process doesn't stop querying after getting 249 error. It does so every ~10-12 seconds. In a way, the termination upon error logic that I've added to `helios_manager.py` doesn't work since helios isn't crashing, it's simply querying again and again. Refactored part of the `start_helios_node()` and added active telemetry and failover routing.
+
+Still getting rate-limited though so I had to implement the following changes (+ a pretty massive `helios_manager.py` refactoring) as well:
+
+- Added `--fallback` flag to the ethereum node helios CLI since the checkpoint it's trying to catch up from is literally months behind, it basically pings a community beacon (`beaconcha.in`) in this case to grab a starting point that isn't too far from the current header.
+- Added active tail logging for every node (always running) to ensure proper endpoints failover, pretty sure this process isn't very heavy but i'll try to optimize compute heavy task soon.
