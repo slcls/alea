@@ -98,7 +98,7 @@ def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: in
         "network": network, "process": process, "log_path": log_path,
         "el_list": el_rpc_list, "cl_list": cl_rpc_list, "port": rpc_port,
         "el_idx": el_idx, "cl_idx": cl_idx, "log_file": log_file, "failed": False,
-        "strikes": 0, "last_read_pos": 0
+        "first_error_ts": None, "last_read_pos": 0
     }
 
 def _cleanup():
@@ -150,19 +150,25 @@ if __name__ == "__main__":
                             new_logs = f.read().lower()
                             node["last_read_pos"] = f.tell()
 
-                            if "429" in new_logs or "too many requests" in new_logs or "404" in new_logs:
-                                node["strikes"] += 1
+                            has_rate_limit = any(x in new_logs for x in ["status: 429", "status: 404", "too many requests", "rate limit"])
+                            has_recovery = any(x in new_logs for x in ["latest block", "saved checkpoint", "synced"])
 
-                                if node["strikes"] >= 3:
+                            if has_rate_limit:
+                                if node["first_error_ts"] is None:
+                                    node["first_error_ts"] = time.time()
+
+                                elapsed_errors = time.time() - node["first_error_ts"]
+
+                                if elapsed_errors >= 15:
                                     is_zombie = True
                                 else:
-                                    print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} detected a transient rate limit (Strike {node['strikes']}/3). Backing off...")
+                                    print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/15s window). Sustaining node.")
+
+                            elif has_recovery:
+                                if node["first_error_ts"] is not None:
+                                    print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting status trackers.")
+                                node["first_error_ts"] = None
                             
-                            elif "latest block" in new_logs or "saved checkpoint" in new_logs or "synced" in new_logs:
-                                if node["strikes"] > 0:
-                                    print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting rate limit strikes.")
-                                node["strikes"] = 0
-                    
                     except Exception:
                         pass
 
@@ -170,11 +176,11 @@ if __name__ == "__main__":
                     net = node["network"].capitalize()
 
                     if is_zombie:
-                        print(f"[ WARN ] helios_manager: {net} hit max Rate Limit strikes. Assassinating zombie process.")
+                        print(f"[ WARN ] helios_manager: {net} exceeded error state grace window. Executing tactical shutdown...")
                         proc.terminate()
                         proc.wait()
                     else:
-                        print(f"[ WARN ] helios_manager: {net} crashed natively. Analyzing telemetry.")
+                        print(f"[ WARN ] helios_manager: {net} crashed natively. Analyzing telemetry...")
                     
                     node["failed"] = True
                     node["log_file"].close()
@@ -193,23 +199,31 @@ if __name__ == "__main__":
 
                     next_el, next_cl = node["el_idx"], node["cl_idx"]
                     cl_pool, el_pool = node["cl_list"], node["el_list"]
-                    rpc_errors = ["503", "rpc error", "failed to advance", "error decoding", "status:", "429", "404", "too many requests"]
 
-                    if any(err in error_content for err in rpc_errors) or is_zombie:
-                        if node["network"] == "ethereum" and len(cl_pool) > 1 and (next_cl + 1) < len(cl_pool):
-                            print(f"[ LOG ] helios_manager: {net} Consensus endpoint throttled. Rotating CL backup pool.")
+                    is_execution_fault = "execution" in error_content or "el" in error_content
+                    is_consensus_fault = "consensus" in error_content or "cl" in error_content
+
+                    if not is_execution_fault and not is_consensus_fault:
+                        is_execution_fault = True
+
+                    if is_zombie or any(err in error_content for err in ["503", "rpc error", "failed to advance", "status:"]):
+                        if node["network"] == "ethereum" and is_consensus_fault and len(cl_pool) > 1 and (next_cl + 1) < len(cl_pool):
+                            print(f"[ LOG ] helios_manager: Identified Consensus layer failure. Rotating CL pool...")
                             next_cl += 1
                         elif len(el_pool) > 1 and (next_el + 1) < len(el_pool):
-                            print(f"[ LOG ] helios_manager: {net} Execution endpoint throttled. Rotating EL backup pool.")
+                            print(f"[ LOG ] helios_manager: Identified Execution layer failure. Rotating EL pool...")
                             next_el += 1
+                        elif node["network"] == "ethereum" and len(cl_pool) > 1 and (next_cl + 1) < len(cl_pool):
+                            print(f"[ LOG ] helios_manager: EL exhausted. Shifting fault domain to clear CL pool...")
+                            next_cl += 1
                         else:
-                            print(f"[FATAL] helios_manager: {net} endpoints exhausted. No backups remain.")
+                            print(f"[FATAL] helios_manager: {net} pool configurations thoroughly exhausted.")
                             continue
 
                         _active_nodes[i] = start_nodes(node["network"], el_pool, cl_pool, node["port"], next_el, next_cl)
 
                     else:
-                        print(f"[FATAL] helios_manager: Core crash detected. Review error logs natively at: {node['log_path']}")
+                        print(f"[FATAL] helios_manager: Structural crash detected. Diagnostics saved at: {node['log_path']}")
 
     except KeyboardInterrupt:
         pass
