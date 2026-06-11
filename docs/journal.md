@@ -426,3 +426,21 @@ What's good though is I succesfully eliminated the possible `beaconcha.in` singl
 ### 1. Improved Filters & Grace time
 
 Added checks for `execution`, `consensus` before deciding which pool to rotate. + `status: 429`, `status: 404`, or `rate limit` instead of just `404`. + Closed processes only after continously returning error state for more than 15 seconds.
+
+## 06/11:
+
+Okay, a bit of improvement, I am actually being able to connect to the ethereum `eth-mainnetbeacon.g.alchemy.com` RTC now, though I still need to check the official documentation because it's throwing this error in my logs:
+
+```
+status: 400, raw response: b"{\"error\": \"Unsupported method: /eth/v1/beacon/light_client/bootstrap/... on ETH_MAINNETBEACON\"}"
+```
+
+It seems like it returned a `400 Bad Request` error after helios asked for `light_client/bootstrap` payload, a good friend of mine told me that Alchemy's beacon node doesn't actually support Altair's light client sub-protocols. These are some very good diagnostic info though and I'm looking for ways to have it fixed now.
+
+### 1. Bumped ChainSafe `elapsed_errors`
+
+The last grace window for querying dynamic checkpoint from chainsafe was 15 seconds, and upon testing, I figured out that I was still rate-limited at some point. It seems like continous requests gets throttled at a rate that doubles each time (e.g., 2s, 4s, 8s, 16s...), so I bumped it up to 45 seconds.
+
+### 2. Logging Changes on `helios_manager.py`
+
+Added `SESSION_ID` timestamp on logs, reverted back to append mode instead of write so I can better analyze the errors and stuff. Added `last_read_pos` as well.

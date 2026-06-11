@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+SESSION_ID = time.strftime("%Y%m%d_%H%M%S")
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BIN_DIR = PROJECT_ROOT / "bin"
 HELIOS_BIN = BIN_DIR / "helios"
@@ -81,9 +83,11 @@ def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: in
         raise ValueError(f"[FATAL] helios_manager: Unsupported network '{network}'")
     
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = LOG_DIR / f"helios_{network}_{rpc_port}.log"
+    log_path = LOG_DIR / f"helios_{network}_{rpc_port}_{SESSION_ID}.log"
 
-    log_file = open(log_path, "w")
+    initial_file_size = os.path.getsize(log_path) if log_path.exists() else 0
+
+    log_file = open(log_path, "a")
     _open_log_files.append(log_file)
 
     print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}")
@@ -98,7 +102,7 @@ def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: in
         "network": network, "process": process, "log_path": log_path,
         "el_list": el_rpc_list, "cl_list": cl_rpc_list, "port": rpc_port,
         "el_idx": el_idx, "cl_idx": cl_idx, "log_file": log_file, "failed": False,
-        "first_error_ts": None, "last_read_pos": 0
+        "first_error_ts": None, "last_read_pos": initial_file_size
     }
 
 def _cleanup():
@@ -159,16 +163,16 @@ if __name__ == "__main__":
 
                                 elapsed_errors = time.time() - node["first_error_ts"]
 
-                                if elapsed_errors >= 15:
+                                if elapsed_errors >= 45:
                                     is_zombie = True
                                 else:
-                                    print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/15s window). Sustaining node.")
+                                    print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/45s window). Sustaining node.")
 
                             elif has_recovery:
                                 if node["first_error_ts"] is not None:
                                     print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting status trackers.")
                                 node["first_error_ts"] = None
-                            
+                
                     except Exception:
                         pass
 
