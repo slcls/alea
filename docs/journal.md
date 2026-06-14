@@ -444,3 +444,11 @@ The last grace window for querying dynamic checkpoint from chainsafe was 15 seco
 ### 2. Logging Changes on `helios_manager.py`
 
 Added `SESSION_ID` timestamp on logs, reverted back to append mode instead of write so I can better analyze the errors and stuff. Added `last_read_pos` as well.
+
+## 06/13 to 06/14:
+
+Had to take some break due to an emergency yesterday, but we're finally back on business and I've made some useful debugging:
+
+- Definitely made some logic errors on the for loop, the logs says it is rotating the pool but the end-points query (including those on the logs) remains the same.
+- Helios sessions are terminated each time that the pool rotates, and it seems like the header signature on the chainsafe query is getting flagged and block after a number of reboots.
+- `Base endpoints exhausted. No backups remain.` probably due to repeated ethereum node termination (base relies on that for the consensus).

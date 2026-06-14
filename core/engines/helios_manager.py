@@ -25,24 +25,23 @@ def _get_rpc_list(env_var: str) -> list:
         return []
     return [url.strip() for url in raw_val.split(",") if url.strip()]
 
-def fetch_dynamic_checkpoint(cl_pool: list) -> str:
-    for url in cl_pool:
-        clean_url = url.rstrip('/')
-        target = f"{clean_url}/eth/v1/beacon/headers/finalized"
+def fetch_dynamic_checkpoint(cl_url: str) -> str:
+    clean_url = cl_url.rstrip('/')
+    target = f"{clean_url}/eth/v1/beacon/headers/finalized"
 
-        try:
-            req = urllib.request.Request(target, headers={'User-Agent': 'Alea-Supervisor/1.0'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                root = data.get('data', {}).get('root')
+    try:
+        req = urllib.request.Request(target, headers={'User-Agent': 'Alea-Supervisor/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            root = data.get('data', {}).get('root')
 
-                if root:
-                    print(f"[ LOG ] helios_manager: Acquired dynamic L1 checkpoint {root[:10]}... from {clean_url}")
-                    return root
-                
-        except Exception:
-            continue
-    
+            if root:
+                print(f"[ LOG ] helios_manager: Acquired dynamic L1 checkpoint {root[:10]}... from {clean_url}")
+                return root
+            
+    except Exception:
+        pass
+
     return None
 
 def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: int, el_idx: int = 0, cl_idx: int = 0) -> dict:
@@ -53,6 +52,7 @@ def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: in
     
     current_el = el_rpc_list[el_idx % len(el_rpc_list)]
     current_cl = cl_rpc_list[cl_idx % len(cl_rpc_list)] if cl_rpc_list else None
+    checkpoint_root = None
 
     if network == "ethereum":
         command = [
@@ -60,10 +60,22 @@ def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: in
             "--execution-rpc", current_el,
             "--rpc-port", str(rpc_port)
         ]
-        if current_cl: 
-            command.extend(["--consensus-rpc", current_cl])
+        
+        if cl_rpc_list:
+            for offset in range(len(cl_rpc_list)):
+                candidate_idx = (cl_idx + offset) % len(cl_rpc_list)
+                candidate_url = cl_rpc_list[candidate_idx]
 
-        checkpoint_root = fetch_dynamic_checkpoint(cl_rpc_list) if cl_rpc_list else None
+                root = fetch_dynamic_checkpoint(candidate_url)
+
+                if root:
+                    checkpoint_root = root
+                    current_cl = candidate_url
+                    cl_idx = candidate_idx
+                    break
+
+            if current_cl:
+                command.extend(["--consensus-rpc", current_cl])
 
         if checkpoint_root:
             command.extend(["--checkpoint", checkpoint_root])
@@ -154,27 +166,26 @@ if __name__ == "__main__":
                             new_logs = f.read().lower()
                             node["last_read_pos"] = f.tell()
 
-                            has_rate_limit = any(x in new_logs for x in ["status: 429", "status: 404", "too many requests", "rate limit"])
-                            has_recovery = any(x in new_logs for x in ["latest block", "saved checkpoint", "synced"])
+                        has_rate_limit = any(x in new_logs for x in ["status: 429", "status: 404", "too many requests", "rate limit"])
+                        has_recovery = any(x in new_logs for x in ["latest block", "saved checkpoint", "synced"])
 
-                            if has_rate_limit:
-                                if node["first_error_ts"] is None:
-                                    node["first_error_ts"] = time.time()
+                        if has_rate_limit and node["first_error_ts"] is None:
+                            node["first_error_ts"] = time.time()
 
-                                elapsed_errors = time.time() - node["first_error_ts"]
-
-                                if elapsed_errors >= 45:
-                                    is_zombie = True
-                                else:
-                                    print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/45s window). Sustaining node.")
-
-                            elif has_recovery:
-                                if node["first_error_ts"] is not None:
-                                    print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting status trackers.")
-                                node["first_error_ts"] = None
+                        if has_recovery:
+                            if node["first_error_ts"] is not None:
+                                print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting status trackers.")
+                            node["first_error_ts"] = None
                 
                     except Exception:
                         pass
+
+                if node["first_error_ts"] is not None:
+                    elapsed_errors = time.time() - node["first_error_ts"]
+                    if elapsed_errors >= 45:
+                        is_zombie = True
+                    else:
+                        print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/45s window). Sustaining node.")
 
                 if is_dead or is_zombie:
                     net = node["network"].capitalize()
