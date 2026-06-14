@@ -1,246 +1,223 @@
 import os
-import atexit
-import subprocess
-import time
+import asyncio
 import json
 import urllib.request
+import logging
+from enum import Enum
+from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
-
-SESSION_ID = time.strftime("%Y%m%d_%H%M%S")
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BIN_DIR = PROJECT_ROOT / "bin"
-HELIOS_BIN = BIN_DIR / "helios"
-LOG_DIR = PROJECT_ROOT / "data" / "logs"
+HELIOS_BIN = PROJECT_ROOT / "bin" / "helios"
 
-_active_nodes = []
-_open_log_files = []
+logger = logging.getLogger("Alea.Supervisor")
+logging.basicConfig(
+    level=logging.INFO,
+    format="[ %(levelname)s ] %(asctime)s | %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
 
-def _get_rpc_list(env_var: str) -> list:
-    raw_val = os.getenv(env_var, "")
-    if not raw_val:
-        return []
-    return [url.strip() for url in raw_val.split(",") if url.strip()]
+class NodeState(Enum):
+    BOOTING = "BOOTING"
+    SYNCING = "SYNCING"
+    HEALTHY = "HEALTHY"
+    THROTTLED = "THROTTLED"
+    DEAD = "DEAD"
 
-def fetch_dynamic_checkpoint(cl_url: str) -> str:
-    clean_url = cl_url.rstrip('/')
-    target = f"{clean_url}/eth/v1/beacon/headers/finalized"
+class HeliosNode:
+    def __init__(self, network: str, el_rpcs: list[str], cl_rpcs: list[str], port: int):
+        self.network = network
+        self.el_rpcs = el_rpcs
+        self.cl_rpcs = cl_rpcs
+        self.port = port
+
+        self.state = NodeState.BOOTING
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.stream_task: Optional[asyncio.Task] = None
+
+        self.el_idx = 0
+        self.cl_idx = 0
+        self.checkpoint_root: Optional[str] = None
+
+    @property
+    def current_el(self) -> str:
+        return self.el_rpcs[self.el_idx % len(self.el_rpcs)] if self.el_rpcs else ""
+    
+    @property
+    def current_cl(self) -> str:
+        return self.cl_rpcs[self.cl_idx % len(self.cl_rpcs)] if self.cl_rpcs else ""
+
+    def rotate_el(self):
+        self.el_idx += 1
+        logger.warning(f"[{self.network.upper()}] Rotating EL pool -> {self.current_el[:45]}...")
+
+    def rotate_cl(self):
+        self.cl_idx += 1
+        logger.warning(f"[{self.network.upper()}] Rotating CL pool -> {self.current_cl[:45]}...")
+
+    async def _async_http_post(self, url: str, payload: dict, timeout=5) -> dict:
+        def fetch():
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json', 'User-Agent': 'Alea-Supervisor/1.0'}
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode())
+            
+        return await asyncio.to_thread(fetch)
+
+    async def _async_http_get(self, url: str, timeout=5) -> dict:
+        def fetch():
+            req = urllib.request.Request(url, headers={'User-Agent': 'Alea-Supervisor/1.0'})
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode())
+        
+        return await asyncio.to_thread(fetch)
+
+    async def validate_upstream_rpcs(self) -> bool:
+        logger.info(f"[{self.network.upper()}] Running pre-flight checks...")
+
+        try:
+            el_payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+            el_res = await self._async_http_post(self.current_el, el_payload)
+
+            if 'error' in el_res or 'result' not in el_res:
+                return False
+
+        except Exception as e:
+            logger.error(f"[{self.network.upper()}] EL Pre-flight failed: {e}")
+            return False
+
+        if self.current_cl == "ethereum" and self.current_cl:
+            try:
+                cl_target = f"{self.current_cl.rstrip('/')}/eth/v1/beacon/headers/finalized"
+                cl_res = await self._async_http_get(cl_target)
+
+                root = cl_res.get('data', {}).get('root')
+                if not root:
+                    return False
+                
+                self.checkpoint_root = root
+                logger.info(f"[{self.network.upper()}] Pre-flight passed. Checkpoint: {root[:10]}...")
+
+            except Exception as e:
+                logger.error(f"[{self.network.upper()}] CL Pre-flight failed (Likely no Altair support): {e}")
+                return False
+            
+        return True
+
+    async def start(self):
+        if not await self.validate_upstream_rpcs():
+            self.state = NodeState.DEAD
+            return
+        
+        cmd = [str(HELIOS_BIN)]
+        if self.network == "ethereum":
+            cmd.extend(["ethereum", "--execution-rpc", self.current_el, "--rpc-port", str(self.port)])
+            if self.current_cl:
+                cmd.extend(["--consensus-rpc", self.current_cl])
+            if self.checkpoint_root:
+                cmd.extend(["--checkpoint", self.checkpoint_root])
+            else:
+                cmd.extend(["--fallback", "https://sync-mainnet.beaconcha.in"])
+        
+        elif self.network == "base":
+            cmd.extend(["opstack", "--network", "base", "--execution-rpc", self.current_el, "--rpc-port", str(self.port)])
+
+        logger.info(f"[{self.network.upper()}] Booting Light Client on port {self.port}...")
+        self.state = NodeState.BOOTING
+
+        self.process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+
+        self.stream_task = asyncio.create_task(self.consume_stream())
+
+    async def consume_stream(self):
+        if not self.process or not self.process.stdout:
+            return
+
+        while not self.process.stdout.at_eof():
+            line_bytes = await self.process.stdout.readline()
+            if not line_bytes:
+                break
+
+            line = line_bytes.decode('utf-8', errors='ignore').strip()
+            line_lower = line.lower()
+
+            if any(x in line_lower for x in ["latest block", "saved checkpoint", "synced"]):
+                if self.state != NodeState.HEALTHY:
+                    logger.info(f"[{self.network.upper()}] Node successfully synced and healthy.")
+                    self.state = NodeState.HEALTHY
+
+            elif any(x in line_lower for x in ["status: 429", "status: 404", "too many requests", "rate limit", "status: 503"]):
+                logger.warning(f"[{self.network.upper()}] Detected HTTP Rate Limit / Friction.")
+                self.state = NodeState.THROTTLED
+                break
+
+        if self.process.returncode is not None and self.state != NodeState.THROTTLED:
+            logger.error(f"[{self.network.upper()}] Process crashed natively.")
+            self.state = NodeState.DEAD
+
+    async def terminate(self):
+        if self.process and self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+        if self.stream_task:
+            self.stream_task.cancel()
+
+async def main_supervisor():
+    def get_rpcs(env_var: str) -> list[str]:
+        return [url.strip() for url in os.getenv(env_var, "").split(",") if url.strip()]
+    
+    eth_node = HeliosNode("ethereum", get_rpcs("ETH_EXECUTION_RPC"), get_rpcs("ETH_CONSENSUS_RPC"), 8545)
+    base_node = HeliosNode("base", get_rpcs("BASE_EXECUTION_RPC"), get_rpcs("BASE_CONSENSUS_RPC"), 8546)
+
+    nodes = [eth_node, base_node]
+
+    for node in nodes:
+        await node.start()
+        await asyncio.sleep(2)
+
+    logger.info("[ SYSTEM ] Async Supervisor Active. Press Ctrl+C to exit.")
 
     try:
-        req = urllib.request.Request(target, headers={'User-Agent': 'Alea-Supervisor/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            root = data.get('data', {}).get('root')
+        while True:
+            await asyncio.sleep(3)
 
-            if root:
-                print(f"[ LOG ] helios_manager: Acquired dynamic L1 checkpoint {root[:10]}... from {clean_url}")
-                return root
-            
-    except Exception:
-        pass
+            for node in nodes:
+                if node.state in (NodeState.THROTTLED, NodeState.DEAD):
+                    logger.warning(f"[{node.network.upper()}] State is {node.state.name}. Executing failover sequence...")
 
-    return None
+                    await node.terminate()
 
-def start_nodes(network: str, el_rpc_list: list, cl_rpc_list: list, rpc_port: int, el_idx: int = 0, cl_idx: int = 0) -> dict:
-    if not HELIOS_BIN.exists():
-        raise FileNotFoundError(f"[FATAL] helios_manager: Binary not found at {HELIOS_BIN}")
-    if not el_rpc_list:
-        raise ValueError(f"[FATAL] helios_manager: Missing Execution RPC for {network}")
-    
-    current_el = el_rpc_list[el_idx % len(el_rpc_list)]
-    current_cl = cl_rpc_list[cl_idx % len(cl_rpc_list)] if cl_rpc_list else None
-    checkpoint_root = None
+                    if node.state == NodeState.THROTTLED:
+                        logger.info(f"[{node.network.upper()}] Applying token bucket cooldown (15s) to respect limits...")
+                        await asyncio.sleep(15)
 
-    if network == "ethereum":
-        command = [
-            str(HELIOS_BIN), "ethereum",
-            "--execution-rpc", current_el,
-            "--rpc-port", str(rpc_port)
-        ]
-        
-        if cl_rpc_list:
-            for offset in range(len(cl_rpc_list)):
-                candidate_idx = (cl_idx + offset) % len(cl_rpc_list)
-                candidate_url = cl_rpc_list[candidate_idx]
+                    node.rotate_el()
 
-                root = fetch_dynamic_checkpoint(candidate_url)
+                    if node.network == "ethereum":
+                        node.rotate_cl()
 
-                if root:
-                    checkpoint_root = root
-                    current_cl = candidate_url
-                    cl_idx = candidate_idx
-                    break
+                    await node.start()
 
-            if current_cl:
-                command.extend(["--consensus-rpc", current_cl])
-
-        if checkpoint_root:
-            command.extend(["--checkpoint", checkpoint_root])
-        else:
-            print("[ WARN ] helios_manager: All dynamic checkpoints failed or unavailable. Falling back to beaconcha.in")
-            command.extend(["--fallback", "https://sync-mainnet.beaconcha.in"])
-
-    elif network == "base":
-        command = [
-            str(HELIOS_BIN), "opstack",
-            "--network", "base",
-            "--execution-rpc", current_el,
-            "--rpc-port", str(rpc_port)
-        ]
-
-    else:
-        raise ValueError(f"[FATAL] helios_manager: Unsupported network '{network}'")
-    
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = LOG_DIR / f"helios_{network}_{rpc_port}_{SESSION_ID}.log"
-
-    initial_file_size = os.path.getsize(log_path) if log_path.exists() else 0
-
-    log_file = open(log_path, "a")
-    _open_log_files.append(log_file)
-
-    print(f"[ LOG ] helios_manager: Booting {network.capitalize()} Light Client on port {rpc_port}")
-    print(f"[ LOG ] helios_manager: Target EL -> {current_el[:45]}")
-
-    if current_cl: 
-        print(f"[ LOG ] helios_manager: Target CL/L1 -> {current_cl[:45]}")
-
-    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
-
-    return {
-        "network": network, "process": process, "log_path": log_path,
-        "el_list": el_rpc_list, "cl_list": cl_rpc_list, "port": rpc_port,
-        "el_idx": el_idx, "cl_idx": cl_idx, "log_file": log_file, "failed": False,
-        "first_error_ts": None, "last_read_pos": initial_file_size
-    }
-
-def _cleanup():
-    for node in _active_nodes:
-        if not node["failed"] and node["process"].poll() is None:
-            node["process"].terminate()
-            node["process"].wait()
-    
-    for f in _open_log_files:
-        if not f.closed: 
-            f.close()
-
-    if _active_nodes:
-        print("\n[ LOG ] helios_manager: All active Helios nodes successfully terminated and logs saved.")
-
-atexit.register(_cleanup)
+    except asyncio.CancelledError:
+        logger.info("[ SYSTEM ] Shutdown signal received. Terminating nodes...")
+    finally:
+        for node in nodes:
+            await node.terminate()
 
 if __name__ == "__main__":
-    eth_el = _get_rpc_list("ETH_EXECUTION_RPC")
-    eth_cl = _get_rpc_list("ETH_CONSENSUS_RPC")
-    base_el = _get_rpc_list("BASE_EXECUTION_RPC")
-    base_cl = _get_rpc_list("BASE_CONSENSUS_RPC")
+    if not HELIOS_BIN.exists():
+        logger.error(f"FATAL: Helios binary not found at {HELIOS_BIN}")
+        exit(1)
 
     try:
-        _active_nodes.append(start_nodes("ethereum", eth_el, eth_cl, 8545))
-
-        print("[ LOG ] helios_manager: Allowing L1 peer handshake to settle (10s delay)...")
-        time.sleep(10)
-
-        _active_nodes.append(start_nodes("base", base_el, base_cl, 8546))
-        print("\n[ SYSTEM ] helios_manager: Continuous Supervisor Active. Press Ctrl+C to exit.\n")
-
-        while True:
-            time.sleep(2)
-            
-            for i, node in enumerate(_active_nodes):
-                if node["failed"]: 
-                    continue
-
-                proc = node["process"]
-                is_dead = proc.poll() is not None
-                is_zombie = False
-                new_logs = ""
-
-                if not is_dead:
-                    try:
-                        with open(node["log_path"], "r") as f:
-                            f.seek(node["last_read_pos"])
-                            new_logs = f.read().lower()
-                            node["last_read_pos"] = f.tell()
-
-                        has_rate_limit = any(x in new_logs for x in ["status: 429", "status: 404", "too many requests", "rate limit"])
-                        has_recovery = any(x in new_logs for x in ["latest block", "saved checkpoint", "synced"])
-
-                        if has_rate_limit and node["first_error_ts"] is None:
-                            node["first_error_ts"] = time.time()
-
-                        if has_recovery:
-                            if node["first_error_ts"] is not None:
-                                print(f"[ LOG ] helios_manager: {node['network'].capitalize()} successfully recovered. Resetting status trackers.")
-                            node["first_error_ts"] = None
-                
-                    except Exception:
-                        pass
-
-                if node["first_error_ts"] is not None:
-                    elapsed_errors = time.time() - node["first_error_ts"]
-                    if elapsed_errors >= 45:
-                        is_zombie = True
-                    else:
-                        print(f"[ ALERT ] helios_manager: {node['network'].capitalize()} experiencing transport friction ({int(elapsed_errors)}s/45s window). Sustaining node.")
-
-                if is_dead or is_zombie:
-                    net = node["network"].capitalize()
-
-                    if is_zombie:
-                        print(f"[ WARN ] helios_manager: {net} exceeded error state grace window. Executing tactical shutdown...")
-                        proc.terminate()
-                        proc.wait()
-                    else:
-                        print(f"[ WARN ] helios_manager: {net} crashed natively. Analyzing telemetry...")
-                    
-                    node["failed"] = True
-                    node["log_file"].close()
-
-                    if node["log_file"] in _open_log_files:
-                        _open_log_files.remove(node["log_file"])
-
-                    try:
-                        with open(node["log_path"], "r") as f:
-                            f.seek(0, os.SEEK_END)
-                            file_size = f.tell()
-                            f.seek(max(file_size - 5000, 0), os.SEEK_SET)
-                            error_content = f.read().lower()
-                    except Exception:
-                        error_content = ""
-
-                    next_el, next_cl = node["el_idx"], node["cl_idx"]
-                    cl_pool, el_pool = node["cl_list"], node["el_list"]
-
-                    is_execution_fault = "execution" in error_content or "el" in error_content
-                    is_consensus_fault = "consensus" in error_content or "cl" in error_content
-
-                    if not is_execution_fault and not is_consensus_fault:
-                        is_execution_fault = True
-
-                    if is_zombie or any(err in error_content for err in ["503", "rpc error", "failed to advance", "status:"]):
-                        if node["network"] == "ethereum" and is_consensus_fault and len(cl_pool) > 1 and (next_cl + 1) < len(cl_pool):
-                            print(f"[ LOG ] helios_manager: Identified Consensus layer failure. Rotating CL pool...")
-                            next_cl += 1
-                        elif len(el_pool) > 1 and (next_el + 1) < len(el_pool):
-                            print(f"[ LOG ] helios_manager: Identified Execution layer failure. Rotating EL pool...")
-                            next_el += 1
-                        elif node["network"] == "ethereum" and len(cl_pool) > 1 and (next_cl + 1) < len(cl_pool):
-                            print(f"[ LOG ] helios_manager: EL exhausted. Shifting fault domain to clear CL pool...")
-                            next_cl += 1
-                        else:
-                            print(f"[FATAL] helios_manager: {net} pool configurations thoroughly exhausted.")
-                            continue
-
-                        _active_nodes[i] = start_nodes(node["network"], el_pool, cl_pool, node["port"], next_el, next_cl)
-
-                    else:
-                        print(f"[FATAL] helios_manager: Structural crash detected. Diagnostics saved at: {node['log_path']}")
-
+        asyncio.run(main_supervisor())
     except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"[FATAL] helios_manager: Supervisor engine failure - {e}")
+        logger.info("\n[ SYSTEM ] Gracefully exited.")

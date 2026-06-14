@@ -445,10 +445,34 @@ The last grace window for querying dynamic checkpoint from chainsafe was 15 seco
 
 Added `SESSION_ID` timestamp on logs, reverted back to append mode instead of write so I can better analyze the errors and stuff. Added `last_read_pos` as well.
 
-## 06/13 to 06/14:
+## 06/13:
 
 Had to take some break due to an emergency yesterday, but we're finally back on business and I've made some useful debugging:
 
 - Definitely made some logic errors on the for loop, the logs says it is rotating the pool but the end-points query (including those on the logs) remains the same.
 - Helios sessions are terminated each time that the pool rotates, and it seems like the header signature on the chainsafe query is getting flagged and block after a number of reboots.
 - `Base endpoints exhausted. No backups remain.` probably due to repeated ethereum node termination (base relies on that for the consensus).
+
+## 06/14:
+
+After some tedious debugging with no clear progress, I have decided to completely scratch out the current `helios_manager.py` and change my approach into a more verbose, modular, and development friendly alternative:
+
+- The earlier `helios_manager.py` has some very messy `while True` loops that juggle process states that makes it super hard for me to debug which failing is who. I plan on refactoring this completely, still unified though but I want to integrate something like `eth_node.check_health()` and `base_node.check_health()` to encapsulate the processes.
+- Gonna add a dedicated `test_helios_eth.py` with python's `test_helios_eth.py` mock as well along side the main program so I can easily see the bottlenecks. Definitely going to use the `logging` library as well as the `asyncio` framework to capture logs in real time.
+- Originally, I was planning to build the docker microservices near the end of project, but working with different machines and different environments (my main PC, codespaces, MAC Lab PC, etc.) as well as the networking errors that I have to debug each and everytime made me decide that this phase is also the perfect time to learn docker and implement it.
+- Gonna add a pre-flight checks as well that pings `/eth/v1/node/version` / `/eth/v1/beacon/headers` RPC endpoints before starting the main program.
+- The logs earlier really gives me a massive migraine, I have decided to have `BOOTING`, `SYNCING`, `HEALTHY`, `THROTTLED`, or `DEAD` states rather than some messy logging syntax.
+
+---
+
+### 1. Newly refactored `helios_manager.py`
+
+- Calls `/eth/v1/beacon/headers/finalized` during `validate_upstream_rpcs()` to confirm if the node actually supports Altair light client protocol as well as to grab the dynamic checkpoint needed to boot helios (bypassing `fetch_dynamic_checkpoint`).
+- It now parse in real time wherein the `consume_stream()` and `readline()` functions accepts the output byte by byte, and triggers `NodeState.THROTTLED` instantly without waiting for the logging.
+- Refactored the disk/file stored tailing with `asyncio.create_subprocess_exec` wherein it is now stored in memory to remove I/O bottlenecks (+ storage degragation).
+- Implemented the `NodeState(Enum)` dictionary mentioned earlier to classify the actions that we will use for each node.
+- `stdout=asyncio.subprocess.PIPE` that captures the output to python memory as to not degrate the host flash memory.
+- Added `@property` decorator so we can avoid `IndexOutOfBounds` errors.
+- Better RPC rotations, failover, and lots of other stuff that I hope works.
+
+### 2. (documenting tomorrow, been on a 6 hour refactoring and coding grind, too tired to write docs)
