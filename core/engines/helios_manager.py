@@ -124,8 +124,8 @@ class HeliosNode:
             self.stream_task.cancel()
 
 async def main_supervisor():
-    eth_node = HeliosNode("ethereum", el_rpc="http://127.0.0.1:9000", cl_rpc="http://127.0.0.1:9001", port=8545)
-    base_node = HeliosNode("base", el_rpc="http://127.0.0.1:9002", cl_rpc="", port=8546)
+    eth_node = HeliosNode("ethereum", el_rpc="http://127.0.0.1:43200", cl_rpc="http://127.0.0.1:43201", port=43210)
+    base_node = HeliosNode("base", el_rpc="http://127.0.0.1:43202", cl_rpc="", port=43211)
 
     nodes = [eth_node, base_node]
 

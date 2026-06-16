@@ -475,7 +475,99 @@ After some tedious debugging with no clear progress, I have decided to completel
 - Added `@property` decorator so we can avoid `IndexOutOfBounds` errors.
 - Better RPC rotations, failover, and lots of other stuff that I hope works.
 
-### 2. (documenting tomorrow, been on a 6 hour refactoring and coding grind, too tired to write docs)
+### 2. Bug fixes
+
+- Base node fails the pre-flight check (`400 Bad Request`), rotates to EL Pool, then fails again. I was able to find the issue wherein the .env file still has the alchemy and infura L1 endpoints on `BASE_CONSENSUS_RPC` , as per the earlier logs, base does not require a consensus (`--l1-rpc` argument). `validate_upstream_rpcs()` is pinging those list entries for a beacon header `/eth/v1/beacon/...`.
+- Ethereum boots okay with chainsafe, it syncs for about ~15 seconds then it is suddenly rate limited (`status: 429`), rotates to `ethstaker.cc` (`404 Not Found` respond), rotates to `lightclientdata.org` (`503 Service Temporarily Unavailable` response) and it goes all over again 😭🙏. I have checked my alchemy logs and some of the request didn't even make it there, suggesting that it was definitely blocked (probably due to simultaneous compute request limits). The other two RPC doesn't seem to be helping.
+
+To fix those, I have made some changes to `validate_upstream_rpcs` so that it only validate the consensus layer if the network is == ethereum (issue #1). I also added a 15 seconds sleep in the `main_supervisor` if a node is marked as `THROLLED`, and I have pruned the other two non-functioning RPC (temporarily, I just want it to work flawlessly with ChainSafe for now).
+
+---
+
+### 3. Major Refactoring & Updates
+
+Lots of errors, debugging, research, and some other stuff happened during this period of time and I probably won't be able to document all of it. But basically, I chose to scrap out the entire helios module in favor these changes:
+
+- To solve the rate limiting issue, I have decided to add the following public RPC Roster:
+  1. `https://cloudflare-eth.com`
+  2. `https://eth.llamarpc.com`
+  3. `https://ethereum-rpc.publicnode.com`
+  4. `https://rpc.ankr.com/eth`
+  5. `https://1rpc.io/eth`
+
+- This alone technically wouldn't solve the rate limit issue if the program is simply bombarding one endpoint then rotating to the next once it encounters an error, so I opted to create a load balancer program (with a primary endpoint while keeping a record of the current state and an active failover that instantly caches the pending request and send it to the next provider on the list).
+
+### 4. Development of `rpc_proxy.py`
+
+This program serves as the load balancer that also host the endpoint that provides the input data for `helios_manager.py` in a way wherein helios manager now only focuses on the hosting and helios logic while the `rpc_proxy.py` manages all of the consensus and networking stuff. As per the network, it runs on the following port (for now, planning to migrate it later to some "surely" unoccupied ports; `127.0.0.1:xxxx`):
+  - `9000:` Ethereum Execution (EL)
+  - `9001:` Ethereum Consensus (CL)
+  - `9002:` Base Execution (EL)
+
+It also utilizes `aiohttp` instead of the standard `urllib` to avoid concurrent proxy request bottlenecks.
 
 ## 06/16:
 
+### 1. Complete `rpc_proxy.py` & Refactored `helios_manager.py`
+
+This is a continuation of the progress last time, tested it as well and it is really looking promising and more easier to debug and maintain compared to the unified helios manager. The proxy perfectly swept the endpoint, correctly identified dead and active nodes, staggered distributed checks (didn't mentioned this earlier but I basically programmed it in a way wherein dead nodes are pinged every 60 seconds, if it returns a valid response, it is moved to active nodes... The pings are distributed as to not create a network spike), `helios_manager.py` succesfully got the beacon root from chainsafe, base network run for 15+ minutes without any error, none of the program crashed. Very nice progress!!!
+
+Still though, there is a single issue to be resolved:
+
+- I only have one working CL endpoint as of the moment (ChainSafe), the thing is, it runs flawlessly for sometime then it gets rate-limited, moved to dead pool, waits for 60 seconds to move back to active pool... And since it has no replacement, it's dead for that entire 60 seconds period of time.
+
+### 2. Fixes & Refactoring
+
+To solve the rate limit bottleneck, I decided to add an additional two public keyless RPC endpoint as well as a private one (with free tier):
+
+  1. `https://eth-beacon-chain.drpc.org`
+  2. `https://ethereum-beacon-rpc.publicnode.com`
+  3. `https://nodereal.io` (private, free tier)
+
+Not only that but I also added a local rate limit to throttle down the initial sync queries of helios to only every ~100ms. This of course, increased the initialization phase by about ~15-20 seconds but it should be able to effortlessly sustain all of the operation loads once the node finally complete the sync.
+
+In addition, the earlier ports (9000s and 8545, 8546) are fairly common and used by other webservices/crypto applications. To avoid networking conflicts, I have explicitly moved everything to `43200` range:
+
+  - `43200` -> ETH Proxy (Execution)
+  - `43201` -> ETH Proxy (Consensus)
+  - `43202` -> BASE Proxy (Execution)
+  - `43210` -> Helios ETH Verified Output
+  - `43211` -> Helios BASE Verified Output
+
+---
+
+And oh boy, you do not know how happy am I right now. It finally works! The endpoints sweep is beautifully done! **4:3 (Active : Dead Ratio)** on `ETH_EL` and **2:4 (Active : Dead Ratio)** on `ETH_CL` and **4:1 (Active : Dead Ratio)** on `BASE_EL`, helios booted very well and was handed off a good beacon root, beautiful fallback and recovery on ChainSafe without stopping operation. This is as good as it can get, I am really happy about it (considering the fact that this was the hardest part so far).
+
+<details>
+<summary>helios_manager.py logs:</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ python3 core/engines/helios_manager.py
+[ INFO ] 21:09:20 | Alea.Supervisor: [ETHEREUM] Requesting dynamic checkpoint from local proxy...
+[ INFO ] 21:09:20 | Alea.Supervisor: [ETHEREUM] Checkpoint acquired: 0x2f0b91a8...
+[ INFO ] 21:09:20 | Alea.Supervisor: [ETHEREUM] Booting Light Client on port 43210...
+[ INFO ] 21:09:22 | Alea.Supervisor: [BASE] Booting Light Client on port 43211...
+[ INFO ] 21:09:23 | Alea.Supervisor: [ETHEREUM] Node successfully synced and healthy.
+[ INFO ] 21:09:24 | Alea.Supervisor: [BASE] Node successfully synced and healthy.
+[ INFO ] 21:09:24 | Alea.Supervisor: [ SYSTEM ] Async Supervisor Active. Press Ctrl+C to exit.
+^C
+[ INFO ] 21:13:42 | Alea.Supervisor: [ SYSTEM ] Shutdown signal received. Terminating nodes...
+```
+</details>
+
+<details>
+<summary>rpc_proxy.py partial logs:</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ /home/slcls/WORKSPACE/GITHUB/alea/.venv/bin/python /home/slcls/WORKSPACE/GITHUB/alea/core/engines/rpc_proxy.py
+[ INFO ] 21:09:11 | Alea.Proxy: [BASE_EL] Boot Sweep Complete. Active: 4 | Dead: 1
+[ INFO ] 21:09:11 | Alea.Proxy: [ETH_EL] Boot Sweep Complete. Active: 4 | Dead: 3
+[ INFO ] 21:09:13 | Alea.Proxy: [ETH_CL] Boot Sweep Complete. Active: 2 | Dead: 4
+[ INFO ] 21:09:13 | Alea.Proxy: [ SYSTEM ] Web3 Proxy Multiplexer Active. Awaiting Helios traffic...
+[ INFO ] 21:09:21 | aiohttp.access: 127.0.0.1 [16/Jun/2026:21:09:20 +0800] "GET /eth/v1/beacon/light_client/bootstrap/0x2f0b91a8c3eb7bf3c8b812363b6d0ebaa95457cdd19017f1b61ceb9fcab9bf82 HTTP/1.1" 200 54548 "-" "-"
+[ WARNING ] 21:09:23 | Alea.Proxy: [ETH_CL] Endpoint https://lodestar-mainnet.chainsafe.... threw 429. Banish to Dead Pool.
+[ WARNING ] 21:09:23 | Alea.Proxy: [ETH_CL] https://lodestar-mainnet.chainsafe.... assigned to Dead Pool. Recovery check in 60s.
+[ INFO ] 21:10:03 | aiohttp.access: 127.0.0.1 [16/Jun/2026:21:10:03 +0800] "GET /eth/v2/beacon/blocks/14565947 HTTP/1.1" 200 461766 "-" "-"
+[ INFO ] 21:10:24 | Alea.Proxy: [ETH_CL] https://lodestar-mainnet.chainsafe.... RECOVERED. Graduated to Active Pool.
+```
+</details>

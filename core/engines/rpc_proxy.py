@@ -69,20 +69,6 @@ class ProxyRouter:
             if is_healthy:
                 self.dead_pool.remove(url)
                 self.active_pool.append(url)
-                logger.info(f"[{self.name}] {url[:35]}... RECOVERED. Graduated to Active Pool.")
-                break
-            else:
-                await asyncio.sleep(60)
-
-    async def _sweep_initial(self):
-        logger.info(f"[{self.name}] Initiating boot sweep of {len(self.dead_pool)} endpoints...")
-        
-        endpoints_to_test = list(self.dead_pool)
-        for url in endpoints_to_test:
-            is_healthy = await self._test_endpoint(url)
-            if is_healthy:
-                self.dead_pool.remove(url)
-                self.active_pool.append(url)
 
         logger.info(f"[{self.name}] Boot Sweep Complete. Active: {len(self.active_pool)} | Dead: {len(self.dead_pool)}")
 
@@ -100,6 +86,9 @@ class ProxyRouter:
         if not self.active_pool:
             logger.error(f"[{self.name}] FATAL: Active pool is completely empty. Returning 503.")
             return web.Response(status=503, text="No upstream endpoints available.")
+
+        if self.node_type == "CL":
+            await asyncio.sleep(0.1)
 
         body = await request.read()
         path = request.rel_url.path_qs
@@ -130,7 +119,7 @@ class ProxyRouter:
                         body=response_data,
                         content_type=resp.content_type
                     )
-                
+
             except asyncio.TimeoutError:
                 logger.warning(f"[{self.name}] Endpoint {target_url[:35]}... timed out. Banish to Dead Pool.")
                 self._mark_dead_and_retry(target_url)
@@ -158,9 +147,9 @@ async def main():
         return [url.strip() for url in os.getenv(env_var, "").split(",") if url.strip()]
 
     routers = [
-        ProxyRouter("ETH_EL", 9000, get_rpcs("ETH_EXECUTION_RPC"), "EL"),
-        ProxyRouter("ETH_CL", 9001, get_rpcs("ETH_CONSENSUS_RPC"), "CL"),
-        ProxyRouter("BASE_EL", 9002, get_rpcs("BASE_EXECUTION_RPC"), "EL")
+        ProxyRouter("ETH_EL", 43200, get_rpcs("ETH_EXECUTION_RPC"), "EL"),
+        ProxyRouter("ETH_CL", 43201, get_rpcs("ETH_CONSENSUS_RPC"), "CL"),
+        ProxyRouter("BASE_EL", 43202, get_rpcs("BASE_EXECUTION_RPC"), "EL")
     ]
 
     await asyncio.gather(*(router.start_server() for router in routers))
