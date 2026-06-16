@@ -476,3 +476,6 @@ After some tedious debugging with no clear progress, I have decided to completel
 - Better RPC rotations, failover, and lots of other stuff that I hope works.
 
 ### 2. (documenting tomorrow, been on a 6 hour refactoring and coding grind, too tired to write docs)
+
+## 06/16:
+

@@ -156,3 +156,29 @@ class ProxyRouter:
 async def main():
     def get_rpcs(env_var: str) -> list[str]:
         return [url.strip() for url in os.getenv(env_var, "").split(",") if url.strip()]
+
+    routers = [
+        ProxyRouter("ETH_EL", 9000, get_rpcs("ETH_EXECUTION_RPC"), "EL"),
+        ProxyRouter("ETH_CL", 9001, get_rpcs("ETH_CONSENSUS_RPC"), "CL"),
+        ProxyRouter("BASE_EL", 9002, get_rpcs("BASE_EXECUTION_RPC"), "EL")
+    ]
+
+    await asyncio.gather(*(router.start_server() for router in routers))
+
+    logger.info("[ SYSTEM ] Web3 Proxy Multiplexer Active. Awaiting Helios traffic...")
+
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        for router in routers:
+            if router.session:
+                await router.session.close()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("\n[ SYSTEM ] Proxy cleanly terminated.")
