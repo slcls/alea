@@ -571,3 +571,13 @@ And oh boy, you do not know how happy am I right now. It finally works! The endp
 [ INFO ] 21:10:24 | Alea.Proxy: [ETH_CL] https://lodestar-mainnet.chainsafe.... RECOVERED. Graduated to Active Pool.
 ```
 </details>
+
+## 06/17:
+
+### 1. Added `ws_subscriber.py`
+
+Earlier, Helios is running on ports `43210` and `43211` by itself. This new websocker subscriber program localted at `/core/server/` basically taps into those ports using the `websockets` library. Instead of constantly polling the node that waste CPU cycles, it uses a json RPC method with the `newHeads` parameter that forces helios to actively push block header to alea the exact time that the block is verified.
+
+### 2. Added `test_helios_manager.py`
+
+Same concept with `test_crypto.py` but it uses `unittest.IsolatedAsyncioTestCase` and extensive `AsyncMock` objects to deal with asynchronous event loops. It basically feeds simulated data in an isolated environment to ensure that `helios_manager.py` works properly on almost all anticipated cases. Also added some test cases for possible OS program interuption (say, if it encounters an out of memory error on a raspberry pi) as well as possible native processes crash.
