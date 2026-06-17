@@ -581,3 +581,16 @@ Earlier, Helios is running on ports `43210` and `43211` by itself. This new webs
 ### 2. Added `test_helios_manager.py`
 
 Same concept with `test_crypto.py` but it uses `unittest.IsolatedAsyncioTestCase` and extensive `AsyncMock` objects to deal with asynchronous event loops. It basically feeds simulated data in an isolated environment to ensure that `helios_manager.py` works properly on almost all anticipated cases. Also added some test cases for possible OS program interuption (say, if it encounters an out of memory error on a raspberry pi) as well as possible native processes crash.
+
+### 3. Testing & Fixes
+
+The `ws_subscriber.py` logs contains this line -> `sent 1009 (message too big) frame with 1064612 bytes exceeds limit of 1048576 bytes` which stems from the 1MB limit of `websockets` library, seems like the BASE node pushed a block `1.06 MB` in size that caused that error. Changed the `max_size` to 10MB.
+
+The `test_helios.py` on the other hand returned this error:
+
+```text
+AssertionError: <NodeState.BOOTING: 'BOOTING'> != <NodeState.HEALTHY: 'HEALTHY'>
+RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+```
+
+This was an issue with `self.eth_node.process.stdout` since it was mocked as `AsyncMock()` and every method inside of it becomes asynchronous mocked, `at_eof()` method was supposed to be a normal synchronous method.

@@ -72,7 +72,8 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
             b'INFO helios::client: node successfully synced\n',
             b''
         ]
-        self.eth_node.process.stdout.at_eof.side_effect = [False, False, True]
+
+        self.eth_node.process.stdout.at_eof = MagicMock(side_effect=[False, False, True])
         await self.eth_node.consume_stream()
         self.assertEqual(self.eth_node.state, NodeState.HEALTHY)
 
@@ -80,8 +81,9 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
         self.eth_node.process = MagicMock()
         self.eth_node.process.returncode = 1 
         self.eth_node.process.stdout = AsyncMock()
-        self.eth_node.process.stdout.readline.return_value = b'' 
-        self.eth_node.process.stdout.at_eof.return_value = True
+        self.eth_node.process.stdout.readline.return_value = b''
+
+        self.eth_node.process.stdout.at_eof = MagicMock(return_value=True)
 
         await self.eth_node.consume_stream()
         self.assertEqual(self.eth_node.state, NodeState.DEAD)

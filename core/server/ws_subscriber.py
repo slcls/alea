@@ -23,7 +23,13 @@ async def subscribe_new_heads(network: str, ws_url: str):
         try:
             logger.info(f"[{network.upper()}] Attempting WS connection to {ws_url}...")
 
-            async with websockets.connect(ws_url, ping_interval=20, ping_timeout=20) as ws:
+            async with websockets.connect(
+                ws_url,
+                ping_interval=20,
+                ping_timeout=20,
+                max_size=10_485_760
+                ) as ws:
+                
                 await ws.send(json.dumps(payload))
 
                 sub_response_raw = await ws.recv()
