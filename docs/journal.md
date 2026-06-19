@@ -594,3 +594,37 @@ RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
 ```
 
 This was an issue with `self.eth_node.process.stdout` since it was mocked as `AsyncMock()` and every method inside of it becomes asynchronous mocked, `at_eof()` method was supposed to be a normal synchronous method.
+
+## 06/18:
+
+### 1. Research and Planning
+
+Working on designing the program specifications and architecture for the BTC SPV module. I plan on relying primarily on trusted public RPC endpoints while locally verifying Merkle roots and Proof of Work difficulty. Of course, I also considered having a direct P2P connection but I opted to have a separate module that users can download to optionally support this in the future, this is because compared to the fast and quick json queries and lightweight nature of public RPC option, using direct P2P connections means much more resource footprint (both on RAM and CPU) due to its bandwidth heavy nature as well as the need to host our own table of block headers (plus some other issues like network splits, multiplexing of endpoints, etc.). I plan on having the similar active/dead pool and failover logic as the one I did in helios. As per the data I have gathered, here are the current pool of endpoints that I am planning to add as of the moment:
+
+  1. `electrum.blockstream.info:50002`
+  2. `bitcoin.lu.ke:50002`
+  3. `alvey.pissedoff.net:50002`
+  4. `electrum.emzy.de:50002`
+  5. `electrum.jochen-hoenicke.de:50006`
+  6. `fortress.qtornado.com:443`
+  7. `gateway.tatum.io` (private, free tier)
+
+I also looked on some private providers that provides a free tier, there's definitely a few compared to ETH/BASE but I manage to find `https://tatum.io/`, setting up the account and stuff as of the moment. Going to start the real development tomorrow.
+
+NOTE TO MYSELF:
+- Keep transport protocols in mind (Stratum protocol).
+- Add Tatum ETH and Base endpoints (lesss gooo, greater pool population).
+
+## 06/19
+
+### 1. Minor RPC endpoint entry fix
+
+Tested out all of the RPC endpoints for helios by manually sending a query via insomia and I found that `https://eth2-beacon-mainnet.nodereal.io` on `ETH_CONSENSUS_RPC` is almost always alive but for some reason it is always placed at the dead pool, checked the program, didn't find any issue. And when I checked the .env, I saw this entry `https://eth2-beacon-mainnet.nodereal.io/v1/SAMPLE_KEY/eth/v1` lmao 😭🙏, I forgot to remove the `/eth/v1` part at the end, the program automatically appends that. Fixed that already, seems to be working well now.
+
+### 2. Added `gateway.tatum.io` to Pool
+
+This was originally planned to be used for BTC SPV, but since it also supports ETH/BASE JSON RPC and ETH BEACON API, I also added it as a backup next to infura, alchemy, and nodereal.
+
+### 3. HTTP Header support
+
+The official documentation for Tatum requires (probably the right word, since passing the API key as a url parameter isn't shown) passing the API key in the HTTP header as `x-api-key: {YOUR_API_KEY}`. Made some changes to `rpc_proxy.py` to accomodate this change dynamically.

@@ -29,7 +29,7 @@ async def subscribe_new_heads(network: str, ws_url: str):
                 ping_timeout=20,
                 max_size=10_485_760
                 ) as ws:
-                
+
                 await ws.send(json.dumps(payload))
 
                 sub_response_raw = await ws.recv()

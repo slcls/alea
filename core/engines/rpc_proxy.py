@@ -13,6 +13,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 
+TATUM_API_KEY = os.getenv("TATUM_API_KEY", "")
+
 class ProxyRouter:
     def __init__(self, name: str, port: int, urls: list[str], node_type: str):
         self.name = name
@@ -26,16 +28,20 @@ class ProxyRouter:
         self.session: ClientSession = None
 
     async def _test_endpoint(self, url: str) -> bool:
+        headers = {'Content-Type': 'application/json'}
+        if "tatum.io" in url and TATUM_API_KEY:
+            headers['x-api-key'] = TATUM_API_KEY
+
         try:
             if self.node_type == "EL":
                 payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-                async with self.session.post(url, json=payload, timeout=ClientTimeout(total=5)) as resp:
+                async with self.session.post(url, json=payload, headers=headers, timeout=ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return 'result' in data
             else:
                 target = f"{url}/eth/v1/beacon/headers/finalized"
-                async with self.session.get(target, timeout=ClientTimeout(total=5)) as resp:
+                async with self.session.get(target, headers=headers, timeout=ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return bool(data.get('data', {}).get('root'))
@@ -100,11 +106,16 @@ class ProxyRouter:
             target_url = self.active_pool[0]
             full_target = f"{target_url}{path}" if path != "/" else target_url
 
+            # Dynamically attach the API key header if routing to Tatum
+            req_headers = {'Content-Type': 'application/json'}
+            if "tatum.io" in full_target and TATUM_API_KEY:
+                req_headers['x-api-key'] = TATUM_API_KEY
+
             try:
                 async with self.session.request(
                     method=request.method,
                     url=full_target,
-                    headers={'Content-Type': 'application/json'},
+                    headers=req_headers,
                     data=body,
                     timeout=ClientTimeout(total=8)
                 ) as resp:
