@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
-from core.engines.helios_manager import HeliosNode, NodeState
+from core.engines.helios.helios_manager import HeliosNode, NodeState
 
 class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -18,7 +18,7 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
             port=43211
         )
 
-    @patch('core.engines.helios_manager.urllib.request.urlopen')
+    @patch('core.engines.helios.helios_manager.urllib.request.urlopen')
     async def test_fetch_checkpoint_success(self, mock_urlopen):
         mock_response = MagicMock()
         mock_response.read.return_value = b'{"data": {"root": "0x123abc"}}'
@@ -30,7 +30,7 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
         self.assertEqual(self.eth_node.checkpoint_root, "0x123abc")
 
-    @patch('core.engines.helios_manager.urllib.request.urlopen')
+    @patch('core.engines.helios.helios_manager.urllib.request.urlopen')
     async def test_fetch_checkpoint_failure(self, mock_urlopen):
         mock_urlopen.side_effect = Exception("HTTP Error 503: Service Unavailable")
 
@@ -39,7 +39,7 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(success)
         self.assertIsNone(self.eth_node.checkpoint_root)
 
-    @patch('core.engines.helios_manager.asyncio.create_subprocess_exec')
+    @patch('core.engines.helios.helios_manager.asyncio.create_subprocess_exec')
     @patch.object(HeliosNode, 'fetch_checkpoint')
     async def test_start_eth_aborts_on_failed_checkpoint(self, mock_fetch, mock_exec):
         mock_fetch.return_value = False
@@ -49,7 +49,7 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.eth_node.state, NodeState.DEAD)
         mock_exec.assert_not_called()
 
-    @patch('core.engines.helios_manager.asyncio.create_subprocess_exec')
+    @patch('core.engines.helios.helios_manager.asyncio.create_subprocess_exec')
     async def test_start_base_boots_without_checkpoint(self, mock_exec):
         mock_process = MagicMock()
         mock_exec.return_value = mock_process
@@ -99,7 +99,7 @@ class TestHeliosManager(unittest.IsolatedAsyncioTestCase):
         self.eth_node.process.wait.assert_awaited_once()
         self.eth_node.stream_task.cancel.assert_called_once()
 
-    @patch('core.engines.helios_manager.asyncio.sleep')
+    @patch('core.engines.helios.helios_manager.asyncio.sleep')
     async def test_supervisor_loop_triggers_restart_on_dead_state(self, mock_sleep):
         mock_sleep.side_effect = [None, asyncio.CancelledError()]
 

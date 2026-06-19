@@ -179,7 +179,7 @@ Added the initial configuration including the pathing to reach `/data/spv_state.
 
 ## 06/07:
 
-### 1. Completed the `btc_spv.py` program
+### 1. Draft of `btc_spv.py` program
 
 Aside from the basic features earlier, I also added dotenv support (though initially it was hard-coded), full consensus node startup, logging, and exit cleanup. I also made some fixes and revisions along the way:
 
@@ -636,3 +636,15 @@ Great addition to be honest, tested it out once again and due to the .env fix pl
 [ INFO ] 12:09:20 | Alea.Proxy: [BASE_EL] Boot Sweep Complete. Active: 5 | Dead: 1
 [ INFO ] 12:09:22 | Alea.Proxy: [ETH_CL] Boot Sweep Complete. Active: 4 | Dead: 3
 ```
+
+### 4. Added initial `btc_spv.py`
+
+Core module for BTC SPV, mode C (Proof). Shares some of the architecture implemented on the earlier helios such as the endpoints sweep, active/dead pool setup, failover, etc. In addition, it also:
+
+- Has support for both the standard HTTP JSON-RPC endpoints (especially for the tatum endpoint), as well as the raw TCP socket connections via electrum protocol (no worries, I'll add an optional stratum protocol support for direct P2P connections later on down the line, probably after the MVP).
+- Has local Proof of Work validation by performing double SHA-256 hash on the 80-byte block headers to verify that they match the expected hash.
+- Uses a local SQLite database with Write-ahead-logging (WAL) -> `spv_state.db` (might not be seen on the github repository since /data/logs is added to .gitignore 😳)
+
+### 5. Preparation & Minor Adjustments
+
+Renamed `rpc_proxy.py` to `helios_proxy.py` to pave way for the similar rpc proxy program for BTC SPV (endpoint load balancer with some other cool features). Also moved both `helios_manager.py` & `helios_rpc.py` to `/core/engines/helios/` for better organization. Also made lots of research and architectural design (that will involve lots of changes), I'm starting to feel a bit of migraine so I'll just document it all tomorrow.
