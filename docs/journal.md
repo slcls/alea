@@ -607,7 +607,7 @@ Working on designing the program specifications and architecture for the BTC SPV
   4. `electrum.emzy.de:50002`
   5. `electrum.jochen-hoenicke.de:50006`
   6. `fortress.qtornado.com:443`
-  7. `gateway.tatum.io` (private, free tier)
+  7. `https://bitcoin-mainnet.gateway.tatum.io` (private, free tier)
 
 I also looked on some private providers that provides a free tier, there's definitely a few compared to ETH/BASE but I manage to find `https://tatum.io/`, setting up the account and stuff as of the moment. Going to start the real development tomorrow.
 
@@ -628,3 +628,11 @@ This was originally planned to be used for BTC SPV, but since it also supports E
 ### 3. HTTP Header support
 
 The official documentation for Tatum requires (probably the right word, since passing the API key as a url parameter isn't shown) passing the API key in the HTTP header as `x-api-key: {YOUR_API_KEY}`. Made some changes to `rpc_proxy.py` to accomodate this change dynamically.
+
+Great addition to be honest, tested it out once again and due to the .env fix plus this new endpoint, it's now `5:3` on `ETH_EL`, `5:1` on `BASE_EL`, and `4:3` on `ETH_CL`:
+
+```text
+[ INFO ] 12:09:20 | Alea.Proxy: [ETH_EL] Boot Sweep Complete. Active: 5 | Dead: 3
+[ INFO ] 12:09:20 | Alea.Proxy: [BASE_EL] Boot Sweep Complete. Active: 5 | Dead: 1
+[ INFO ] 12:09:22 | Alea.Proxy: [ETH_CL] Boot Sweep Complete. Active: 4 | Dead: 3
+```
