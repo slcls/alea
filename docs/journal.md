@@ -648,3 +648,7 @@ Core module for BTC SPV, mode C (Proof). Shares some of the architecture impleme
 ### 5. Preparation & Minor Adjustments
 
 Renamed `rpc_proxy.py` to `helios_proxy.py` to pave way for the similar rpc proxy program for BTC SPV (endpoint load balancer with some other cool features). Also moved both `helios_manager.py` & `helios_rpc.py` to `/core/engines/helios/` for better organization. Also made lots of research and architectural design (that will involve lots of changes), I'm starting to feel a bit of migraine so I'll just document it all tomorrow.
+
+## 06/20:
+
+Gonna document tomorrow, too tired.
