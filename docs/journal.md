@@ -651,4 +651,61 @@ Renamed `rpc_proxy.py` to `helios_proxy.py` to pave way for the similar rpc prox
 
 ## 06/20:
 
-Gonna document tomorrow, too tired.
+Earlier, before the current stable helios module that the program has today, I needed to go through several revisions, refactoring, and on occasions... A full start from scratch due to errors and architectural mistakes. Unfortunately with the recent `btc_spv.py`, I feel like I'm doing the same mistaken by not researching well enough all of the possible edge cases when it comes to the cryptography and BTC blockchain mechanics, and more importantly, the load balancing and failover architecture that I should design (since it also relies on RPCs like helios, though I am planning to add support for direcr P2P and full node in the future). In addition, I feel like it's not modular enough to be maintainable and easy to develop, thus, I have rethinked my approach and decided to start it once again (better and more proper this time). Here are the strict requirements that I am abiding with:
+
+1. **Automatic Block Detection:** The program will be designed to implement the stratum protocol (`blockchain.headers.subscribe`) via persistent TPC sockets to receive input instantly once a block is mined, eliminating the HTTP polling latency.
+
+2. **RPC Multiplexing:** Basically, instead of chosing a primary endpoint and querying it every once in a while, I now plan to to be wherein all of electrum endpoints on the active pool are used. The first valid header to be received will be used while the subsequent delayed headers of the same height will be dropped.
+
+3. **Pool SafeGuard:** Earlier (`btc_spv.py`), when an endpoint provides an invalid header, the program just rotates to the next endpoint without removing that potentially malicious RPC to another pool. This time, if an endpoint pushes an invalid header, it is banished into the dead pool.
+
+4. **True PoW Verification + Target Checking:** Basically parses the `bits` field from the raw 80 bytes header to calculate the exact target threshold $SHA256(SHA256(header))$.
+
+5. **2016 Block Rule (Difficulty Retargeting):** This was actually the mainflaw that a collegue of me pointed out on the original design of the BTC SPV module, I was too naive to realize that the program was actually relying or putting its trust on the RPC. I plan on implemeting the "epoch math" to locally calculate the network's supposed difficulty adjustments (requires 2016 block boundary) -> $NewTarget = OldTarget \times \frac{ActualTime}{2016 \times 10 \text{ minutes}}$
+
+6. **Database Pruning:** I only plan on keeping 3000 blocks to ensure that we abide by the 2016 block rule and allow flexibility for possibly historical window retargeting.
+
+7. **Catch Up Sync Feature:** On boot, the program should evaluate the tip of the SQLite database and execute a bulk fetch of the historical headers to bridge the gap of the current tip and the latest network block.
+
+8. **Network Split Cases:** This is actually one of the main QoL of the plan, basically, from time to time, it happens wherein two miners find a block at the exact same time... The network splits in this case (temporarily), an endpoint may push, for example, block A, then a few moments later, the network agrees on block B. The program should be flexible enough to handle this instances by continously verifying that `previous_block_hash` matches the tip, and if a split thus happens, it should also be able to delete the invalid block and reconstruct the chain from the fork.
+
+9. **Modularity:** Exactly why I restructured the `/engines` directory earlier, I am planning to create a separate folder alongside `/helios` to host both `spv_core.py` (handles cryptographic math and SQLite) as well as `btc_proxy.py` (handles the TCP multiplexing, load balancing, failovers, and other stuff.)
+
+10. **Unified WebSocket Integration:** Gonna refactor ws_subscriber.py so SPV can stream alongside ETH and Base.
+
+
+### 1. Added the refactored `spv_core.py` (partial)
+
+In summary, this initial commit contains mostly the cryptography and math functions to parse raw hexadecimal headers into dictionaries, verify PoW (proof of work) against the parsed `bits` target, and to of course calculate the 2016 block difficulty retarget epoch limits.
+
+### 2. Added `test_spv.py` (for `engines/spv`)
+
+Though it would be the perfect time to add the preliminary math testing module for the SPV programs. Added multiple tests divided into classes (`TestSPVMathCryptography(unittest.TestCase)`, `TestDifficultyTargets(unittest.TestCase)`, and `TestRetargetingEpochs(unittest.TestCase)`). Found this error upon running the program:
+
+<details>
+<summary>test_spv.py logs:</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ python -m unittest tests.test_spv
+.....F...
+======================================================================
+FAIL: test_calculate_next_work_required_max_bound (tests.test_spv.TestRetargetingEpochs.test_calculate_next_work_required_max_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/slcls/WORKSPACE/GITHUB/alea/tests/test_spv.py", line 84, in test_calculate_next_work_required_max_bound
+    self.assertEqual(new_target, self.base_target * 4)
+AssertionError: 26959946667150639794667015087019630673637144422540572481103610249215 != 107838141164045237972625905378895965344043594954296656344551092387840
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.007s
+
+FAILED (failures=1)
+```
+</details>
+
+### 3. Fixes on `spv_core.py`
+
+Took me a bit to understand what is happening in here, so basically, we used `GENESIS_BITS` to run the test, it operates at difficulty = 1 (mathematically the highest possible target / easiest difficulty allowed). The program correctly applied the x4 bound constraint but by multiplyinhg the genesis target by 4, it pushes the integer out of bounds (which btw exceeds the max limit of bitcoin protocol). Added these fixes:
+
+  - Changed `MAX_TARGET` value from `0x00000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` to `0x00000000FFFF0000000000000000000000000000000000000000000000000000`.
+  - Replaced the `test_calculate_next_work_required_max_bound(self)` function on `test_spv.py` with `test_calculate_next_work_required_absolute_ceiling(self)` and `test_calculate_next_work_required_relative_x4_limit(self)`.

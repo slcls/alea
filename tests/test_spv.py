@@ -76,12 +76,22 @@ class TestRetargetingEpochs(unittest.TestCase):
 
         self.assertEqual(new_target, self.base_target // 2)
 
-    def test_calculate_next_work_required_max_bound(self):
+    def test_calculate_next_work_required_absolute_ceiling(self):
         first_time = 1000000000
         last_time = first_time + (self.expected_time * 10)
         new_target = calculate_next_work_required(first_time, last_time, GENESIS_BITS)
         
-        self.assertEqual(new_target, self.base_target * 4)
+        self.assertEqual(new_target, self.base_target)
+
+    def test_calculate_next_work_required_relative_x4_limit(self):
+        first_time = 1000000000
+        last_time = first_time + (self.expected_time * 10)
+
+        harder_bits = 0x181bc330 
+        harder_target = bits_to_target(harder_bits)
+        new_target = calculate_next_work_required(first_time, last_time, harder_bits)
+        
+        self.assertEqual(new_target, harder_target * 4)
 
 if __name__ == '__main__':
     unittest.main()

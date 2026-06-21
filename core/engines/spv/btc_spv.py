@@ -23,41 +23,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 
-def init_db():
-    DATA_DIR.mkdir(exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS headers (
-            height INTEGER PRIMARY KEY,
-            hash TEXT UNIQUE,
-            raw_header TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    conn.commit()
-    return conn
-
-def verify_pow(raw_hex: str, expected_hash: str) -> bool:
-    try:
-        header_bytes = bytes.fromhex(raw_hex)
-
-        if len(header_bytes) != 80:
-            return False
-            
-        hash1 = hashlib.sha256(header_bytes).digest()
-        hash2 = hashlib.sha256(hash1).digest()
-        calculated_hash = hash2[::-1].hex()
-        
-        return calculated_hash == expected_hash
-    
-    except Exception:
-        return False
-
 class BtcSpvManager:
     def __init__(self):
         self.db_conn = init_db()
@@ -92,17 +57,8 @@ class BtcSpvManager:
             best_hash = (await resp.json())['result']
 
         payload2 = {"jsonrpc": "2.0", "method": "getblockheader", "params": [best_hash, True], "id": 2}
-        async with session.post(url, json=payload2, headers=headers, timeout=5) as resp:
-            data = (await resp.json())['result']
-            
-        payload3 = {"jsonrpc": "2.0", "method": "getblockheader", "params": [best_hash, False], "id": 3}
-        async with session.post(url, json=payload3, headers=headers, timeout=5) as resp:
-            raw_hex = (await resp.json())['result']
-
-        return {"height": data['height'], "hash": best_hash, "hex": raw_hex}
 
     async def _fetch_from_electrum(self, endpoint: str) -> dict:
-        host, port = endpoint.split(":")
         
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
@@ -112,8 +68,6 @@ class BtcSpvManager:
         
         try:
             req = json.dumps({"id": 1, "method": "blockchain.headers.subscribe", "params": []}) + "\n"
-            writer.write(req.encode('utf-8'))
-            await writer.drain()
             
             response = await asyncio.wait_for(reader.readline(), timeout=5.0)
             data = json.loads(response.decode('utf-8'))['result']
@@ -154,22 +108,6 @@ class BtcSpvManager:
                     self.active_pool, self.dead_pool = self.dead_pool, []
                     await asyncio.sleep(60)
                     continue
-
-                try:
-                    data = await self._fetch_latest_header(session)
-                    
-                    if data['height'] > self.current_height:
-                        is_valid = verify_pow(data['hex'], data['hash'])
-                        
-                        if is_valid:
-                            self._save_header(data['height'], data['hash'], data['hex'])
-                            self.current_height = data['height']
-                            logger.info(f"[BTC] VERIFIED NEW BLOCK: {self.current_height} | HASH: {data['hash']}")
-                        else:
-                            logger.error(f"[BTC] SECURITY ALERT: Invalid PoW detected for block {data['height']}!")
-                    
-                except Exception as e:
-                    logger.error(f"[BTC] Sync cycle failed: {e}")
                 
                 await asyncio.sleep(60)
 
