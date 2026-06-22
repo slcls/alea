@@ -673,6 +673,7 @@ Earlier, before the current stable helios module that the program has today, I n
 
 10. **Unified WebSocket Integration:** Gonna refactor ws_subscriber.py so SPV can stream alongside ETH and Base.
 
+---
 
 ### 1. Added the refactored `spv_core.py` (partial)
 
@@ -709,3 +710,15 @@ Took me a bit to understand what is happening in here, so basically, we used `GE
 
   - Changed `MAX_TARGET` value from `0x00000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF` to `0x00000000FFFF0000000000000000000000000000000000000000000000000000`.
   - Replaced the `test_calculate_next_work_required_max_bound(self)` function on `test_spv.py` with `test_calculate_next_work_required_absolute_ceiling(self)` and `test_calculate_next_work_required_relative_x4_limit(self)`.
+
+## 06/21:
+
+### 1. Added the State Management to `spv_core.py`
+
+After finally passing the test for the math module, I added the `SPVState` class which wraps the math functions added earlier around an SQLite database. As a summary of its major features, it has `process_new_header` that checks if every raw string pushed by the network has a valid PoW, chronologically mapped to the previous hash, and respects the epoch math. Also added the pruning mechanisim planned earlier (see `prune_ancient_blocks`) baed on the defined `retention_limit` set to 3000 blocks. Plus lots of other features like self-healing forks (`_handle_reorg`) and the 2016 rule execution, see it for yourself!
+
+## 06/22:
+
+### 1. Added State Management tests to `test_spv.py`
+
+Kindly check out the 3 new added classes to the program -> `TestSPVStateManagement(unittest.TestCase)`, `TestSPVStateReorganizations(unittest.TestCase)`, and `TestSPVStateRetargetingAndPruning(unittest.TestCase)`. To summarize most of it's coverage, it contains `test_genesis_block_insertion` that validates the bootstrapping logic when the node boots from the genesis block. `test_invalid_pow_rejection` to check if malicious input are properly rejected. `test_sequential_chaining_and_stale_rejection` that covers the core telemetry. `test_chain_split_rollback` as the name suggest. `test_automated_pruning_execution` that generates an artificial chain of 100 blocks, triggers the prune flag, and execute raw SQLite row count, and some more, just check it out 🙏.
