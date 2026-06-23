@@ -22,6 +22,7 @@ class BtcStratumProxy:
         
         self.output_queue = asyncio.Queue()
         self._active_tasks = {}
+        self._strike_counts = {}
 
         self._parse_env_endpoints()
 
@@ -71,6 +72,7 @@ class BtcStratumProxy:
                 logger.info(f"[BTC_Proxy] {endpoint} RECOVERED. Graduated to Active Pool.")
                 self._spawn_listener(endpoint)
                 break
+
             else:
                 await asyncio.sleep(60)
 
@@ -91,17 +93,28 @@ class BtcStratumProxy:
             asyncio.create_task(self._revival_task(endpoint, staggered_delay))
 
     def _banish_endpoint(self, endpoint: str, reason: str):
-        logger.warning(f"[BTC_Proxy] Endpoint {endpoint} failed ({reason}). Banish to Dead Pool.")
+        strikes = self._strike_counts.get(endpoint, 0) + 1
+        self._strike_counts[endpoint] = strikes
 
-        if endpoint in self.active_pool:
-            self.active_pool.remove(endpoint)
-            self.dead_pool.append(endpoint)
+        if strikes >= 3:
+            logger.error(f"[BTC_Proxy] Endpoint {endpoint} failed ({reason}). STRIKE {strikes}/3. PERMANENTLY BANISHED.")
+            if endpoint in self.active_pool:
+                self.active_pool.remove(endpoint)
+            if endpoint in self.dead_pool:
+                self.dead_pool.remove(endpoint)
+        else:
+            logger.warning(f"[BTC_Proxy] Endpoint {endpoint} failed ({reason}). Strike {strikes}/3. Banish to Dead Pool.")
+            if endpoint in self.active_pool:
+                self.active_pool.remove(endpoint)
+                self.dead_pool.append(endpoint)
             
-            if endpoint in self._active_tasks:
-                self._active_tasks[endpoint].cancel()
-                del self._active_tasks[endpoint]
-
             asyncio.create_task(self._revival_task(endpoint, 60))
+
+        if endpoint in self._active_tasks:
+            task = self._active_tasks[endpoint]
+            if not task.done():
+                task.cancel()
+            del self._active_tasks[endpoint]
 
     async def _listen_to_node(self, endpoint: str):
         host, port = endpoint.split(":")
@@ -131,6 +144,8 @@ class BtcStratumProxy:
                     continue
 
                 if 'hex' in header_data and 'height' in header_data:
+                    self._strike_counts[endpoint] = 0
+
                     await self.output_queue.put({
                         "source": endpoint,
                         "height": header_data['height'],
@@ -159,17 +174,32 @@ class BtcStratumProxy:
             
         logger.info("[BTC_Proxy] Shotgun Multiplexer Active. Awaiting Stratum push notifications...")
 
-if __name__ == "__main__":
-    async def run_test():
-        proxy = BtcStratumProxy()
-        await proxy.start_multiplexer()
+    async def shutdown(self):
+        logger.info("[BTC_Proxy] Initiating graceful shutdown...")
+
+        for endpoint, task in self._active_tasks.items():
+            if not task.done():
+                task.cancel()
         
+        if self._active_tasks:
+            await asyncio.gather(*self._active_tasks.values(), return_exceptions=True)
+
+        logger.info("[BTC_Proxy] All active Stratum sockets closed.")
+
+if __name__ == "__main__":
+    proxy = BtcStratumProxy()
+
+    async def run_test():
+        await proxy.start_multiplexer()
         try:
             while True:
                 payload = await proxy.output_queue.get()
                 logger.info(f"[RACE WINNER] Height: {payload['height']} | Source: {payload['source']}")
+
         except asyncio.CancelledError:
             pass
+        finally:
+            await proxy.shutdown()
 
     try:
         asyncio.run(run_test())

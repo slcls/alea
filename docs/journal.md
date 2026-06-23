@@ -822,3 +822,10 @@ Here's the current ports planned to be occupied by the project:
   - `43210` -> Helios ETH Verified Output
   - `43211` -> Helios BASE Verified Output
   - `43212` -> BTC Verified Output
+
+### 4. `btc_proxy.py` fixes
+
+Tested it out and I am very happy, the multiplexing works, the failover works, almost everything works. There's some minor issues to be fixed though (thankfully it was going smoothly unlike the helios development phase, all thanks to the initial mistakes during that phase I guess). First, I got `asyncio: Task was destroyed but it is pending!` upon pressing control C. The `_listen_to_node` is still running inside `await reader.readline()`. There's also a weird behavior that I need to address like when `fortress.qtornado.com` but suddenly returns `Socket closed by remote host`, it seems like it is passing the health check but the moment that the program try to establish a persistent `blockchain.headers.subscribe` stream, the server-side forcefully closes the socket (wth?).
+
+To fix these issues, I added a quick cleanup hook in the finally block of `start_multiplexer` execution to explicitly call `.cancel()` on all `_active_tasks` before the loop fully shuts down. Also added a 3-strike counter that permanently banish an endpoint from the deadpool to save CPU cycles. Of course, to avoid full exhaustion of endpoints on merely a period of downtime, the strike counter resets if `counter < 3` and it pushes a valid block. (non-persistent though, it gets resets nonetheless upon program reboot)
+
