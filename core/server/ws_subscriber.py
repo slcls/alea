@@ -62,9 +62,10 @@ async def subscribe_new_heads(network: str, ws_url: str):
 async def main():
     eth_task = asyncio.create_task(subscribe_new_heads("ethereum", "ws://127.0.0.1:43210"))
     base_task = asyncio.create_task(subscribe_new_heads("base", "ws://127.0.0.1:43211"))
+    btc_task = asyncio.create_task(subscribe_new_heads("bitcoin", "ws://127.0.0.1:43212"))
 
     logger.info("[ SYSTEM ] Global WebSocket Subscriber Active.")
-    await asyncio.gather(eth_task, base_task)
+    await asyncio.gather(eth_task, base_task, btc_task)
 
 if __name__ == "__main__":
     try:

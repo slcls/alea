@@ -1,8 +1,24 @@
+import os
+import json
+import struct
 import hashlib
 import struct
 import sqlite3
+import asyncio
+import aiohttp
 import logging
+import websockets
 from pathlib import Path
+from core.engines.spv.btc_proxy import BtcStratumProxy
+
+logger = logging.getLogger("Alea.SPV_Orchestrator")
+logging.basicConfig(
+    level=logging.INFO,
+    format="[ %(levelname)s ] %(asctime)s | %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+
+# Math and Crypto Utils
 
 def hash256(data: bytes) -> bytes:
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
@@ -75,8 +91,6 @@ def calculate_next_work_required(first_timestamp: int, last_timestamp: int, old_
     return new_target
 
 # SPV State Management
-
-logger = logging.getLogger("Alea.SPVState")
 
 class SPVState:
     def __init__(self, db_path: Path):
@@ -188,11 +202,9 @@ class SPVState:
                 return self._handle_reorg(expected_height, parsed, raw_hex)
 
         if expected_height < tip['height']:
-            logger.debug(f"[SPV] Ignored stale block at height {expected_height}. Current tip is {tip['height']}.")
             return False
 
         if expected_height > tip['height'] + 1:
-            logger.warning(f"[SPV] Gap detected. Tip is {tip['height']}, received {expected_height}. Requires Catch-Up Sync.")
             return False
 
     def _handle_reorg(self, height: int, parsed: dict, raw_hex: str) -> bool:
@@ -215,3 +227,169 @@ class SPVState:
 
         self.conn.commit()
         logger.info(f"[SPV] VERIFIED NEW BLOCK: {height} | HASH: {parsed['hash']}")
+
+# Pipeline Handler
+
+class SpvOrchestrator:
+    def __init__(self, db_path: Path, ws_port: int = 43212):
+        self.state = SPVState(db_path)
+        self.proxy = BtcStratumProxy()
+        self.ws_port = ws_port
+        self.ws_clients = set()
+
+    async def _ws_handler(self, websocket):
+        self.ws_clients.add(websocket)
+
+        try:
+            async for msg in websocket:
+                pass
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            self.ws_clients.remove(websocket)
+
+    async def _broadcast_new_head(self, height: int, block_hash: str):
+        if not self.ws_clients:
+            return
+        
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "eth_subscription",
+            "params": {
+                "result": {
+                    "number": hex(height),  
+                    "hash": block_hash,
+                    "network": "bitcoin"
+                }
+            }
+        })
+        
+        await asyncio.gather(
+            *[client.send(payload) for client in self.ws_clients],
+            return_exceptions=True
+        )
+
+    async def _execute_catch_up(self):
+        tip = self.state.get_tip()
+        if not tip:
+            logger.info("[SPV_Orchestrator] Database is empty. Awaiting first live Stratum block to anchor the chain...")
+            return
+
+        local_height = tip['height']
+        http_pool = self.proxy.http_reserve_pool
+        if not http_pool:
+            logger.warning("[SPV_Orchestrator] No HTTP reserves mapped in .env. Skipping Catch-Up Sync.")
+            return
+
+        url = http_pool[0]
+        tatum_key = os.getenv("TATUM_API_KEY", "")
+        headers = {'Content-Type': 'application/json'}
+        if "tatum.io" in url and tatum_key:
+            headers['x-api-key'] = tatum_key
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                p1 = {"jsonrpc": "2.0", "method": "getbestblockhash", "params": [], "id": 1}
+                async with session.post(url, json=p1, headers=headers, timeout=5) as resp:
+                    best_hash = (await resp.json())['result']
+
+                p2 = {"jsonrpc": "2.0", "method": "getblockheader", "params": [best_hash, True], "id": 2}
+                async with session.post(url, json=p2, headers=headers, timeout=5) as resp:
+                    latest_height = (await resp.json())['result']['height']
+
+                gap = latest_height - local_height
+                if gap <= 0:
+                    logger.info("[SPV_Orchestrator] Local database is completely synced with the network.")
+                    return
+
+                logger.info(f"[SPV_Orchestrator] Catch-Up Sync Required: Missing {gap} blocks. Fetching via HTTP...")
+
+                start_height = local_height + 1
+                if gap > self.state.retention_limit:
+                    logger.warning(f"[SPV_Orchestrator] Gap ({gap}) exceeds retention limit. Fast-forwarding to safe window.")
+                    start_height = latest_height - self.state.retention_limit + 1
+                    
+                    cursor = self.state.conn.cursor()
+                    cursor.execute("DELETE FROM headers")
+                    self.state.conn.commit()
+
+                for h in range(start_height, latest_height + 1):
+                    p_hash = {"jsonrpc": "2.0", "method": "getblockhash", "params": [h], "id": h}
+                    async with session.post(url, json=p_hash, headers=headers, timeout=5) as r:
+                        block_hash = (await r.json())['result']
+                    
+                    p_hex = {"jsonrpc": "2.0", "method": "getblockheader", "params": [block_hash, False], "id": h}
+                    async with session.post(url, json=p_hex, headers=headers, timeout=5) as r:
+                        raw_hex = (await r.json())['result']
+
+                    if not verify_pow(raw_hex):
+                        logger.error(f"[SPV_Orchestrator] Catch-Up endpoint provided invalid PoW at height {h}! Aborting sync.")
+                        break
+
+                    self.state.process_new_header(h, raw_hex)
+
+                    if h % 100 == 0:
+                        logger.info(f"[SPV_Orchestrator] Catch-Up Progress: {h}/{latest_height}")
+
+                logger.info("[SPV_Orchestrator] Catch-Up Sync completed.")
+
+            except Exception as e:
+                logger.error(f"[SPV_Orchestrator] Catch-Up Sync failed: {e}")
+
+    async def start(self):
+        logger.info("[ SYSTEM ] Booting Alea Bitcoin SPV Orchestrator...")
+        
+        ws_server = await websockets.serve(self._ws_handler, "127.0.0.1", self.ws_port)
+        logger.info(f"[SPV_Orchestrator] Verified Block Stream hosted on ws://127.0.0.1:{self.ws_port}")
+
+        await self.proxy.start_multiplexer()
+        await self._execute_catch_up()
+
+        logger.info("[SPV_Orchestrator] Pipeline glued. Awaiting multiplexer races...")
+
+        try:
+            while True:
+                payload = await self.proxy.output_queue.get()
+                height = payload['height']
+                raw_hex = payload['raw_hex']
+                source = payload['source']
+
+                tip = self.state.get_tip()
+
+                if not verify_pow(raw_hex):
+                    logger.error(f"[SPV_Orchestrator] SECURITY ALERT: Malicious payload from {source}!")
+                    self.proxy._banish_endpoint(source, "Failed PoW Cryptography")
+                    continue
+
+                if tip and height > tip['height'] + 1:
+                    logger.warning(f"[SPV_Orchestrator] Live gap detected (Tip: {tip['height']}, Got: {height}). Pausing race for Catch-Up...")
+                    await self._execute_catch_up()
+
+                is_valid = self.state.process_new_header(height, raw_hex)
+
+                if is_valid:
+                    new_tip = self.state.get_tip()
+                    if new_tip and new_tip['height'] == height:
+                        logger.info(f"[SPV_Orchestrator] BROADCASTING VERIFIED TIP: {height} | Winner: {source}")
+                        await self._broadcast_new_head(height, new_tip['hash'])
+                        
+        except asyncio.CancelledError:
+            pass
+
+        finally:
+            await self.proxy.shutdown()
+            ws_server.close()
+            await ws_server.wait_closed()
+
+if __name__ == "__main__":
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+    DATA_DIR = PROJECT_ROOT / "data"
+    DB_PATH = DATA_DIR / "spv_state.db"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    
+    orchestrator = SpvOrchestrator(DB_PATH)
+
+    try:
+        asyncio.run(orchestrator.start())
+    except KeyboardInterrupt:
+        logger.info("\n[ SYSTEM ] Bitcoin SPV Orchestrator cleanly terminated.")

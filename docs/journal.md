@@ -829,3 +829,5 @@ Tested it out and I am very happy, the multiplexing works, the failover works, a
 
 To fix these issues, I added a quick cleanup hook in the finally block of `start_multiplexer` execution to explicitly call `.cancel()` on all `_active_tasks` before the loop fully shuts down. Also added a 3-strike counter that permanently banish an endpoint from the deadpool to save CPU cycles. Of course, to avoid full exhaustion of endpoints on merely a period of downtime, the strike counter resets if `counter < 3` and it pushes a valid block. (non-persistent though, it gets resets nonetheless upon program reboot)
 
+## 06/24:
+
