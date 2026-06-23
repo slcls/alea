@@ -722,3 +722,103 @@ After finally passing the test for the math module, I added the `SPVState` class
 ### 1. Added State Management tests to `test_spv.py`
 
 Kindly check out the 3 new added classes to the program -> `TestSPVStateManagement(unittest.TestCase)`, `TestSPVStateReorganizations(unittest.TestCase)`, and `TestSPVStateRetargetingAndPruning(unittest.TestCase)`. To summarize most of it's coverage, it contains `test_genesis_block_insertion` that validates the bootstrapping logic when the node boots from the genesis block. `test_invalid_pow_rejection` to check if malicious input are properly rejected. `test_sequential_chaining_and_stale_rejection` that covers the core telemetry. `test_chain_split_rollback` as the name suggest. `test_automated_pruning_execution` that generates an artificial chain of 100 blocks, triggers the prune flag, and execute raw SQLite row count, and some more, just check it out 🙏.
+
+### 2. Fixed Sibling Block blindspot
+
+Upon running `test_spv.py`, I got this error:
+
+<details>
+<summary>test_spv.py logs:</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ python -m unittest tests.test_spv
+...........[SPV] SECURITY ALERT: Invalid PoW for header at expected height 1!
+.[SPV] Gap detected. Tip is 1, received 3. Requires Catch-Up Sync.
+.F..
+======================================================================
+FAIL: test_chain_split_rollback (tests.test_spv.TestSPVStateReorganizations.test_chain_split_rollback)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/unittest/mock.py", line 1378, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/slcls/WORKSPACE/GITHUB/alea/tests/test_spv.py", line 165, in test_chain_split_rollback
+    self.assertTrue(success)
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.068s
+
+FAILED (failures=1)
+```
+</details>
+
+The test simulates a BTC network split at **Height 11**, the database already accepted the first one (`orphan_11`), making the current `tip['height']` equal to 11. It took me a while to understand what's happening but this is the traceback analogy:
+
+- `if expected_height == tip['height'] + 1:` wherein 11 == 12 is evaluated as **false**.
+- `if expected_height <= tip['height']:` wherein 11 <= 11 is evaluated as **true**.
+- The program categorizes the valid tip as an old/stale block and returns **false**.
+
+I'm actually very happy about this catch, it would be worse if this was encountered during production.
+
+Added a fix to `spv_core.py` that breaks apart the `<` and `=` operators in the stale block check so that the engine can route same height conflicts to `_handle_reorg` function.
+
+## 06/23:
+
+### 1. Error fix on the recent test
+
+Applied the fix yesterday, booted the test suite, and encountered this error:
+
+<details>
+<summary>test_spv.py logs:</summary>
+
+```text
+(.venv) slcls@SLCLS:~/WORKSPACE/GITHUB/alea$ python -m unittest tests.test_spv
+...........[SPV] SECURITY ALERT: Invalid PoW for header at expected height 1!
+.[SPV] CHAIN SPLIT DETECTED at height 1. Initiating localized rollback...
+F[SPV] CHAIN SPLIT DETECTED at height 11. Initiating localized rollback...
+======================================================================
+FAIL: test_sequential_chaining_and_stale_rejection (tests.test_spv.TestSPVStateManagement.test_sequential_chaining_and_stale_rejection)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/unittest/mock.py", line 1378, in patched
+    return func(*newargs, **newkeywargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/slcls/WORKSPACE/GITHUB/alea/tests/test_spv.py", line 138, in test_sequential_chaining_and_stale_rejection
+    self.assertFalse(success_stale)
+AssertionError: True is not false
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.010s
+
+FAILED (failures=1) 
+```
+</details>
+
+It seems like it was a logic error that I overlooked earlier. `test_sequential_chaining_and_stale_rejection` pushes a block at the same height as the tip but with a different hash and expected it to be `False`. `test_chain_split_rollback` on the other hand pushes block at the same heigh as well, with a different hash, but expected it to overwrite the tip as a "chain split". The changes earlier violated `test_sequential_chaining_and_stale_rejection`, and I've made some changes to `spv_core.py` and `test_spv.py` to fix this:
+
+- Stale Block is mathematically older than the tip (`expected_height < tip['height']`). Gonna update the test to push a block that is genuinely older, rather than a same-height sibling.
+- Lateral Reorg (Sibling Block) occurs at the exact same height (`expected_height == tip['height']`). Gonna accept this and overwrite the tip.
+- Deep Reorg (Heavier Chain) occurs when the incoming block is `tip['height'] + 1`, but the `prev_hash` does not match the tip. If our tip is proven to be an orphan, we'll delete it and return False so the program initiates a Catch-Up Sync.
+
+### 2. Added initial `btc_proxy.py`
+
+This program, as mentioned earlier, shall serve as a multiplexer that handles the RPC management, load balancing, and failovers. It fully abides by the requirements planned earlier including the:
+
+```
+2. **RPC Multiplexing:** Basically, instead of chosing a primary endpoint and querying it every once in a while, I now plan to to be wherein all of electrum endpoints on the active pool are used. The first valid header to be received will be used while the subsequent delayed headers of the same height will be dropped.
+```
+
+As well as the Catch-Up Reserve (HTTP) wherein wndpoints starting with http will be filtered out of the live pool and safely stored in a separate pool. Implemented to use lightning-fast bulk fetches to sync the SQLite database before we open the live Stratum sockets.
+
+### 3. Network Management for SPV
+
+Here's the current ports planned to be occupied by the project:
+
+  - `43200` -> ETH Proxy (Execution)
+  - `43201` -> ETH Proxy (Consensus)
+  - `43202` -> BASE Proxy (Execution)
+  - `43203` -> BTC Proxy (HTTP Reserve)
+  - `43210` -> Helios ETH Verified Output
+  - `43211` -> Helios BASE Verified Output
+  - `43212` -> BTC Verified Output

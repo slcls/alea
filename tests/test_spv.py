@@ -133,18 +133,20 @@ class TestSPVStateManagement(unittest.TestCase):
         mock_parse.return_value = {"hash": "hash_1", "prev_hash": "hash_0", "timestamp": 1000, "bits": 0x1d00ffff}
         self.spv._insert_header(1, mock_parse.return_value, "hex_1")
 
+        mock_parse.return_value = {"hash": "hash_2", "prev_hash": "hash_1", "timestamp": 1010, "bits": 0x1d00ffff}
+        self.spv._insert_header(2, mock_parse.return_value, "hex_2")
+
         mock_parse.return_value = {"hash": "stale_hash", "prev_hash": "hash_0", "timestamp": 1000, "bits": 0x1d00ffff}
         success_stale = self.spv.process_new_header(1, "stale_hex")
         self.assertFalse(success_stale)
         
-        success_gap = self.spv.process_new_header(3, "gap_hex")
+        success_gap = self.spv.process_new_header(4, "gap_hex")
         self.assertFalse(success_gap)
 
-        mock_parse.return_value = {"hash": "hash_2", "prev_hash": "hash_1", "timestamp": 1010, "bits": 0x1d00ffff}
-        success_valid = self.spv.process_new_header(2, "hex_2")
+        mock_parse.return_value = {"hash": "hash_3", "prev_hash": "hash_2", "timestamp": 1020, "bits": 0x1d00ffff}
+        success_valid = self.spv.process_new_header(3, "hex_3")
         self.assertTrue(success_valid)
-        self.assertEqual(self.spv.get_tip()['height'], 2)
-
+        self.assertEqual(self.spv.get_tip()['height'], 3)
 
 class TestSPVStateReorganizations(unittest.TestCase):
     def setUp(self):

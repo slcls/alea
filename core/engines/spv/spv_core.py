@@ -156,14 +156,14 @@ class SPVState:
         if not verify_pow(raw_hex):
             logger.error(f"[SPV] SECURITY ALERT: Invalid PoW for header at expected height {expected_height}!")
             return False
-        
+
         parsed = parse_header(raw_hex)
         tip = self.get_tip()
 
         if not tip:
             self._insert_header(expected_height, parsed, raw_hex)
             return True
-        
+
         if expected_height == tip['height'] + 1:
             if parsed['prev_hash'] == tip['hash']:
                 if not self.verify_retarget(expected_height, parsed['bits']):
@@ -175,12 +175,22 @@ class SPVState:
                 return True
             
             else:
+                logger.warning(f"[SPV] DEEP FORK DETECTED. Tip {tip['height']} is orphaned. Rolling back...")
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM headers WHERE height >= ?", (tip['height'],))
+                self.conn.commit()
+                return False 
+
+        if expected_height == tip['height']:
+            if parsed['hash'] == tip['hash']:
+                return False
+            else:
                 return self._handle_reorg(expected_height, parsed, raw_hex)
-            
-        if expected_height <= tip['height']:
+
+        if expected_height < tip['height']:
             logger.debug(f"[SPV] Ignored stale block at height {expected_height}. Current tip is {tip['height']}.")
             return False
-        
+
         if expected_height > tip['height'] + 1:
             logger.warning(f"[SPV] Gap detected. Tip is {tip['height']}, received {expected_height}. Requires Catch-Up Sync.")
             return False
