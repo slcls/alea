@@ -829,5 +829,17 @@ Tested it out and I am very happy, the multiplexing works, the failover works, a
 
 To fix these issues, I added a quick cleanup hook in the finally block of `start_multiplexer` execution to explicitly call `.cancel()` on all `_active_tasks` before the loop fully shuts down. Also added a 3-strike counter that permanently banish an endpoint from the deadpool to save CPU cycles. Of course, to avoid full exhaustion of endpoints on merely a period of downtime, the strike counter resets if `counter < 3` and it pushes a valid block. (non-persistent though, it gets resets nonetheless upon program reboot)
 
-## 06/24:
+### 5. Added `SpvOrchestrator` to `spv_core.py`
 
+This shall serve as the merging pipeline for both the cryptography, SQLite handler, and the multiplexer. You may see the `SpvOrchestrator` class below the `spv_core.py` to review the code. As a summary, it contains the boot sync logic (wherein if the node starts, it checks the local SQLite tip and if there is a gap behind the live network, it taps into `http_reserve_pool` [so far, the pool only contains tatum RPC] to fetch the missing blocks via batch JSON-RPC). Also has a self healing logic wherein if the network disconnects for 30 minutes and the live stratum multiplexer pushes a block that is 3 heights abovee the blockchain tip, the program automatically pauses the race and triggers a micro HTTP catch up sync to fill the missing 3 blocks. All verified blocks (state rules including `verify_pow`) are then broadcasted to port `43212` using JSON format the same as helios.
+
+## 06/30:
+
+Took the past week to focus on my academic tasks as well as physical and mental health. Ready to work on the project again, still going through the journals and logs to see where did I left it off. I tested the modules once again and I found these issues:
+
+- `Subscription failed: {'jsonrpc': '2.0', 'method': 'eth_subscription', ...}` is in the logs and I believe it was because `ws_subscriber.py` connected and immediately sends an `eth_subscribe` JSON Payload, waits for `"result": "sub_id"` but the `_ws_handler` in `spv_core.py` is currently ignoring incoming messages.
+- There are definitely some logging redundancies since both `btc_proxy.py` and `spv_core.py` calls `logging.basicConfig(...)`, same goes with the `__main__` execution on the bottom of `btc_proxy.py` wherein the plan is to just have it as an imported class.
+
+### 1. Cleanup and Fixes on `btc_proxy.py` and `spv_core.py`
+
+`logging.basicConfig` and `if __name__ == "__main__":` was removed on `btc_proxy.py` to remove the redundant logging and unnecessary logic. The program is now a purely networking module. Earlier, `_ws_handler` was a passive listener and I revised the program for it to actively read incoming JSON payloads. Wherein if `ws_subscriber.py` connects and sends the `{"method": "eth_subscribe"}` request, it instantly intercepts it and sends a formatted JSON-RPC confirmation containing the mock subscription ID -> `0x9a8b7c6d5e4f3a2b`.

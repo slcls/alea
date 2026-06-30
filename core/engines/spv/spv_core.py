@@ -1,14 +1,18 @@
 import os
+import sys
 import json
 import struct
 import hashlib
-import struct
 import sqlite3
 import asyncio
 import aiohttp
 import logging
 import websockets
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from core.engines.spv.btc_proxy import BtcStratumProxy
 
 logger = logging.getLogger("Alea.SPV_Orchestrator")
@@ -238,11 +242,24 @@ class SpvOrchestrator:
         self.ws_clients = set()
 
     async def _ws_handler(self, websocket):
+        """Actively parses incoming JSON-RPC traffic to simulate an Ethereum Light Client handshake."""
         self.ws_clients.add(websocket)
 
         try:
             async for msg in websocket:
-                pass
+                try:
+                    payload = json.loads(msg)
+                    if payload.get("method") == "eth_subscribe":
+                        reply = {
+                            "jsonrpc": "2.0",
+                            "id": payload.get("id", 1),
+                            "result": "0x9a8b7c6d5e4f3a2b"
+                        }
+                        await websocket.send(json.dumps(reply))
+
+                except json.JSONDecodeError:
+                    pass
+        
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:

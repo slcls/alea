@@ -8,11 +8,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger("Alea.BTC_Proxy")
-logging.basicConfig(
-    level=logging.INFO,
-    format="[ %(levelname)s ] %(asctime)s | %(name)s: %(message)s",
-    datefmt="%H:%M:%S"
-)
 
 class BtcStratumProxy:
     def __init__(self):
@@ -185,23 +180,3 @@ class BtcStratumProxy:
             await asyncio.gather(*self._active_tasks.values(), return_exceptions=True)
 
         logger.info("[BTC_Proxy] All active Stratum sockets closed.")
-
-if __name__ == "__main__":
-    proxy = BtcStratumProxy()
-
-    async def run_test():
-        await proxy.start_multiplexer()
-        try:
-            while True:
-                payload = await proxy.output_queue.get()
-                logger.info(f"[RACE WINNER] Height: {payload['height']} | Source: {payload['source']}")
-
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await proxy.shutdown()
-
-    try:
-        asyncio.run(run_test())
-    except KeyboardInterrupt:
-        logger.info("\n[ SYSTEM ] BTC Proxy cleanly terminated.")
