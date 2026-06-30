@@ -843,3 +843,6 @@ Took the past week to focus on my academic tasks as well as physical and mental 
 ### 1. Cleanup and Fixes on `btc_proxy.py` and `spv_core.py`
 
 `logging.basicConfig` and `if __name__ == "__main__":` was removed on `btc_proxy.py` to remove the redundant logging and unnecessary logic. The program is now a purely networking module. Earlier, `_ws_handler` was a passive listener and I revised the program for it to actively read incoming JSON payloads. Wherein if `ws_subscriber.py` connects and sends the `{"method": "eth_subscribe"}` request, it instantly intercepts it and sends a formatted JSON-RPC confirmation containing the mock subscription ID -> `0x9a8b7c6d5e4f3a2b`.
+
+### 2. Rate Limit Fix for Catch-Up Sync
+

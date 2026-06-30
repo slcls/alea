@@ -308,11 +308,23 @@ class SpvOrchestrator:
             try:
                 p1 = {"jsonrpc": "2.0", "method": "getbestblockhash", "params": [], "id": 1}
                 async with session.post(url, json=p1, headers=headers, timeout=5) as resp:
-                    best_hash = (await resp.json())['result']
+                    data1 = await resp.json()
+                    if 'result' not in data1:
+                        logger.error(f"[SPV_Orchestrator] Initial Catch-Up request failed (Rate Limit?): {data1}")
+                        return
+                    
+                    best_hash = data1['result']
+
+                await asyncio.sleep(0.45)
 
                 p2 = {"jsonrpc": "2.0", "method": "getblockheader", "params": [best_hash, True], "id": 2}
                 async with session.post(url, json=p2, headers=headers, timeout=5) as resp:
-                    latest_height = (await resp.json())['result']['height']
+                    data2 = await resp.json()
+                    if 'result' not in data2:
+                        logger.error(f"[SPV_Orchestrator] Initial Catch-Up request failed (Rate Limit?): {data2}")
+                        return
+                    
+                    latest_height = data2['result']['height']
 
                 gap = latest_height - local_height
                 if gap <= 0:
@@ -331,22 +343,56 @@ class SpvOrchestrator:
                     self.state.conn.commit()
 
                 for h in range(start_height, latest_height + 1):
-                    p_hash = {"jsonrpc": "2.0", "method": "getblockhash", "params": [h], "id": h}
-                    async with session.post(url, json=p_hash, headers=headers, timeout=5) as r:
-                        block_hash = (await r.json())['result']
+                    success = False
+                    retries = 0
                     
-                    p_hex = {"jsonrpc": "2.0", "method": "getblockheader", "params": [block_hash, False], "id": h}
-                    async with session.post(url, json=p_hex, headers=headers, timeout=5) as r:
-                        raw_hex = (await r.json())['result']
+                    while not success and retries < 5:
+                        try:
+                            await asyncio.sleep(0.45)
+                            
+                            p_hash = {"jsonrpc": "2.0", "method": "getblockhash", "params": [h], "id": h}
+                            async with session.post(url, json=p_hash, headers=headers, timeout=5) as r:
+                                data_hash = await r.json()
 
-                    if not verify_pow(raw_hex):
-                        logger.error(f"[SPV_Orchestrator] Catch-Up endpoint provided invalid PoW at height {h}! Aborting sync.")
+                                if 'result' not in data_hash:
+                                    logger.warning(f"[SPV_Orchestrator] Rate limited on hash fetch for block {h}. Retrying in 2s...")
+                                    await asyncio.sleep(2)
+                                    retries += 1
+                                    continue
+                                block_hash = data_hash['result']
+                        
+                            await asyncio.sleep(0.45)
+
+                            p_hex = {"jsonrpc": "2.0", "method": "getblockheader", "params": [block_hash, False], "id": h}
+                            async with session.post(url, json=p_hex, headers=headers, timeout=5) as r:
+                                data_hex = await r.json()
+
+                                if 'result' not in data_hex:
+                                    logger.warning(f"[SPV_Orchestrator] Rate limited on hex fetch for block {h}. Retrying in 2s...")
+                                    await asyncio.sleep(2)
+                                    retries += 1
+                                    continue
+                                raw_hex = data_hex['result']
+
+                            if not verify_pow(raw_hex):
+                                logger.error(f"[SPV_Orchestrator] Catch-Up endpoint provided invalid PoW at height {h}! Aborting sync.")
+                                return
+
+                            self.state.process_new_header(h, raw_hex)
+
+                            if h % 100 == 0:
+                                logger.info(f"[SPV_Orchestrator] Catch-Up Progress: {h}/{latest_height}")
+                            
+                            success = True
+
+                        except Exception as e:
+                            logger.warning(f"[SPV_Orchestrator] Transient error fetching block {h}: {e}. Retrying in 2s...")
+                            await asyncio.sleep(2)
+                            retries += 1
+
+                    if not success:
+                        logger.error(f"[SPV_Orchestrator] Failed to fetch block {h} after 5 retries. Aborting Catch-Up Sync.")
                         break
-
-                    self.state.process_new_header(h, raw_hex)
-
-                    if h % 100 == 0:
-                        logger.info(f"[SPV_Orchestrator] Catch-Up Progress: {h}/{latest_height}")
 
                 logger.info("[SPV_Orchestrator] Catch-Up Sync completed.")
 
