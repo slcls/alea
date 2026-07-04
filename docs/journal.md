@@ -846,3 +846,13 @@ Took the past week to focus on my academic tasks as well as physical and mental 
 
 ### 2. Rate Limit Fix for Catch-Up Sync
 
+Logs shows this line `[SPV_Orchestrator] Catch-Up Sync failed: 'result'` which I think is a classic python `KeyError` wherein the for loop on the `_execute_catch_up` function is firing back to back POST reqursts to the Tatum HTTP endpoint to fetch the missing blocks. I just checked the official rate limiting docs for Tatum and the free trial seems to be [limited to 3 request per second](https://docs.tatum.io/docs/plans-limits). To solve this issue, I revised `spv_core.py` to check `if 'result' not in data:` first before attempting to extract it. If it is missing (HTTP 429 Rate Limit), it triggers a warning, waits 2 seconds, and retries up to 5 times. Added `await asyncio.sleep(0.45)` as well before the HTTP request to ensure that we abide (with a good buffer) by tatum's RPS limit.
+
+NOTE: (Architecture correction) Port 43203 is not currently being used (might not be used at all) because `SpvOrchestrator` directly imports the `BtcStratumProxy` class, it can read the `http_reserve_pool` directly out of system memory.
+
+---
+
+All is working very well as of the moment, planning to take a good rest and start the next phase later on next month.
+
+## 07/04:
+
