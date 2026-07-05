@@ -857,3 +857,5 @@ All is working very well as of the moment, planning to take a good rest and star
 ## 07/04 - 07/05:
 
 ### 1. Added `/crypto/signatures.py`
+
+### 2. Added Signatures to `spv_core.py` pipeline

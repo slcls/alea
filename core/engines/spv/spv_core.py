@@ -244,26 +244,38 @@ class SpvOrchestrator:
         self.signer = EphemeralSigner()
 
     async def _ws_handler(self, websocket):
+        """Actively parses incoming JSON-RPC traffic to simulate an Ethereum Light Client handshake."""
         self.ws_clients.add(websocket)
 
         try:
             async for msg in websocket:
                 try:
                     payload = json.loads(msg)
+
                     if payload.get("method") == "eth_subscribe":
                         reply = {
                             "jsonrpc": "2.0",
                             "id": payload.get("id", 1),
-                            "result": "0x9a8b7c6d5e4f3a2b"
+                            "result": "0x9a8b7c6d5e4f3a2b",
+                            "alea_pubkey": self.signer.get_public_key_b64()
                         }
+
                         await websocket.send(json.dumps(reply))
 
                 except json.JSONDecodeError:
                     pass
 
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        finally:
+            self.ws_clients.remove(websocket)
+
     async def _broadcast_new_head(self, height: int, block_hash: str):
         if not self.ws_clients:
             return
+
+        payload_bytes = block_hash.encode('utf-8')
+        signature_b64 = self.signer.sign_payload(payload_bytes)
         
         payload = json.dumps({
             "jsonrpc": "2.0",
@@ -272,7 +284,8 @@ class SpvOrchestrator:
                 "result": {
                     "number": hex(height),  
                     "hash": block_hash,
-                    "network": "bitcoin"
+                    "network": "bitcoin",
+                    "signature": signature_b64
                 }
             }
         })
