@@ -9,12 +9,13 @@ import aiohttp
 import logging
 import websockets
 from pathlib import Path
-from core.crypto.signatures import EphemeralSigner
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.engines.spv.btc_proxy import BtcStratumProxy
+from core.crypto.signatures import EphemeralSigner
+from core.crypto.canonicalization import build_payload
 
 logger = logging.getLogger("Alea.SPV_Orchestrator")
 logging.basicConfig(
@@ -244,7 +245,6 @@ class SpvOrchestrator:
         self.signer = EphemeralSigner()
 
     async def _ws_handler(self, websocket):
-        """Actively parses incoming JSON-RPC traffic to simulate an Ethereum Light Client handshake."""
         self.ws_clients.add(websocket)
 
         try:
@@ -274,8 +274,8 @@ class SpvOrchestrator:
         if not self.ws_clients:
             return
 
-        payload_bytes = block_hash.encode('utf-8')
-        signature_b64 = self.signer.sign_payload(payload_bytes)
+        canonical_bytes = build_payload(block_hash)
+        signature_b64 = self.signer.sign_payload(canonical_bytes)
         
         payload = json.dumps({
             "jsonrpc": "2.0",
