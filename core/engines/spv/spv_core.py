@@ -9,6 +9,7 @@ import aiohttp
 import logging
 import websockets
 from pathlib import Path
+from core.crypto.signatures import EphemeralSigner
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -240,9 +241,9 @@ class SpvOrchestrator:
         self.proxy = BtcStratumProxy()
         self.ws_port = ws_port
         self.ws_clients = set()
+        self.signer = EphemeralSigner()
 
     async def _ws_handler(self, websocket):
-        """Actively parses incoming JSON-RPC traffic to simulate an Ethereum Light Client handshake."""
         self.ws_clients.add(websocket)
 
         try:
@@ -259,11 +260,6 @@ class SpvOrchestrator:
 
                 except json.JSONDecodeError:
                     pass
-        
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            self.ws_clients.remove(websocket)
 
     async def _broadcast_new_head(self, height: int, block_hash: str):
         if not self.ws_clients:

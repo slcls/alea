@@ -854,5 +854,6 @@ NOTE: (Architecture correction) Port 43203 is not currently being used (might no
 
 All is working very well as of the moment, planning to take a good rest and start the next phase later on next month.
 
-## 07/04:
+## 07/04 - 07/05:
 
+### 1. Added `/crypto/signatures.py`
